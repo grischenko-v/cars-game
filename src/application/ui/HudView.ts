@@ -1,5 +1,5 @@
+import * as THREE from 'three'
 import { createApp, h, reactive } from '@vue/runtime-dom'
-import type { VNode } from '@vue/runtime-dom'
 
 interface HudState {
   speed: number
@@ -7,14 +7,21 @@ interface HudState {
   gear: number
 }
 
-interface GaugeOptions {
+interface AnalogGaugeOptions {
   title: string
-  value: string
   unit: string
-  color: string
-  dashOffset: number
-  center: VNode[]
+  value: number
+  maxValue: number
+  majorStep: number
+  minorStep: number
+  accentColor: string
+  dangerFrom?: number
+  bottomLabel?: string
 }
+
+const START_ANGLE = -132
+const SWEEP_ANGLE = 264
+const CENTER = 80
 
 export class HudView {
   private readonly element: HTMLDivElement
@@ -29,7 +36,7 @@ export class HudView {
     this.element.style.position = 'fixed'
     this.element.style.right = '16px'
     this.element.style.bottom = '16px'
-    this.element.style.width = '344px'
+    this.element.style.width = '352px'
     this.element.style.padding = '12px'
     this.element.style.background = 'linear-gradient(145deg, rgba(13,15,18,0.72), rgba(32,36,40,0.56))'
     this.element.style.backdropFilter = 'blur(8px)'
@@ -63,9 +70,7 @@ export class HudView {
   }
 
   private render() {
-    const rpmRatio = Math.min(this.state.rpm / 7200, 1)
-    const rpmColor = rpmRatio > 0.86 ? '#ff6b55' : '#f3e7a4'
-    const speedRatio = Math.min(this.state.speed / 240, 1)
+    const rpmInThousands = this.state.rpm / 1000
 
     return h(
       'div',
@@ -77,75 +82,74 @@ export class HudView {
         },
       },
       [
-        this.renderGauge({
+        this.renderAnalogGauge({
           title: 'SPEED',
-          value: String(this.state.speed),
           unit: 'km/h',
-          color: '#85d7ff',
-          dashOffset: 276 - 276 * speedRatio,
-          center: [
-            h('div', { style: this.centerValueStyle(40) }, this.state.speed),
-            h('div', { style: this.centerUnitStyle() }, 'km/h'),
-          ],
+          value: this.state.speed,
+          maxValue: 240,
+          majorStep: 40,
+          minorStep: 20,
+          accentColor: '#85d7ff',
+          bottomLabel: 'km/h',
         }),
-        this.renderGauge({
-          title: 'TACH',
-          value: Math.round(this.state.rpm).toString(),
-          unit: 'rpm',
-          color: rpmColor,
-          dashOffset: 276 - 276 * rpmRatio,
-          center: [
-            h('div', { style: { ...this.centerValueStyle(34), color: rpmColor } }, this.state.gear),
-            h('div', { style: this.centerUnitStyle() }, 'GEAR'),
-            h(
-              'div',
-              { style: { marginTop: '3px', fontSize: '12px', opacity: '0.82' } },
-              Math.round(this.state.rpm)
-            ),
-          ],
+        this.renderAnalogGauge({
+          title: 'RPM',
+          unit: 'x1000',
+          value: rpmInThousands,
+          maxValue: 8,
+          majorStep: 1,
+          minorStep: 0.5,
+          accentColor: this.state.rpm > 6200 ? '#ff6b55' : '#f3e7a4',
+          dangerFrom: 6.4,
+          bottomLabel: `GEAR ${this.state.gear}`,
         }),
       ]
     )
   }
 
-  private renderGauge(options: GaugeOptions) {
+  private renderAnalogGauge(options: AnalogGaugeOptions) {
+    const clampedValue = Math.max(0, Math.min(options.value, options.maxValue))
+    const needleAngle = this.valueToAngle(clampedValue, options.maxValue)
+
     return h(
       'div',
       {
         style: {
           position: 'relative',
-          height: '150px',
+          height: '158px',
           borderRadius: '50%',
           background:
-            'radial-gradient(circle at 50% 56%, rgba(255,255,255,0.12) 0 2px, transparent 3px), radial-gradient(circle at 50% 50%, rgba(6,7,9,0.98) 0 54%, rgba(37,42,47,0.94) 55% 68%, rgba(8,10,12,0.96) 70%)',
+            'radial-gradient(circle at 50% 48%, rgba(255,255,255,0.14) 0 2px, transparent 3px), radial-gradient(circle at 50% 52%, rgba(5,6,8,0.98) 0 52%, rgba(36,41,47,0.96) 54% 70%, rgba(7,9,12,0.98) 72%)',
           boxShadow:
-            'inset 0 12px 22px rgba(255,255,255,0.08), inset 0 -18px 34px rgba(0,0,0,0.7), 0 8px 18px rgba(0,0,0,0.32)',
+            'inset 0 13px 24px rgba(255,255,255,0.08), inset 0 -20px 36px rgba(0,0,0,0.76), 0 8px 18px rgba(0,0,0,0.32)',
           overflow: 'hidden',
         },
       },
       [
-        this.renderGaugeSvg(options),
         h(
-          'div',
+          'svg',
           {
+            viewBox: '0 0 160 160',
             style: {
               position: 'absolute',
               inset: '0',
-              display: 'grid',
-              placeItems: 'center',
-              textAlign: 'center',
-              textShadow: '0 2px 10px rgba(0,0,0,0.78)',
+              width: '100%',
+              height: '100%',
             },
           },
           [
-            h('div', [
-              h(
-                'div',
-                { style: { fontSize: '10px', letterSpacing: '0.16em', opacity: '0.54' } },
-                options.title
-              ),
-              ...options.center,
-            ]),
+            this.renderScaleRing(),
+            ...this.renderTicks(options),
+            options.dangerFrom ? this.renderDangerArc(options) : null,
+            this.renderNeedle(needleAngle, options.accentColor),
+            h('circle', {
+              cx: CENTER,
+              cy: CENTER,
+              r: '6.5',
+              fill: '#16191d',
+              stroke: options.accentColor,
+              'stroke-width': '2',
+            }),
           ]
         ),
         h(
@@ -154,84 +158,151 @@ export class HudView {
             style: {
               position: 'absolute',
               left: '50%',
-              bottom: '17px',
+              top: '31px',
               transform: 'translateX(-50%)',
               fontSize: '10px',
-              letterSpacing: '0.14em',
-              opacity: '0.58',
-              textTransform: 'uppercase',
+              fontWeight: '800',
+              letterSpacing: '0.18em',
+              opacity: '0.62',
             },
           },
-          `${options.value} ${options.unit}`
+          options.title
+        ),
+        h(
+          'div',
+          {
+            style: {
+              position: 'absolute',
+              left: '50%',
+              bottom: '24px',
+              transform: 'translateX(-50%)',
+              minWidth: '54px',
+              padding: '3px 8px',
+              borderRadius: '999px',
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              color: options.accentColor,
+              fontSize: '10px',
+              fontWeight: '900',
+              letterSpacing: '0.12em',
+              textAlign: 'center',
+            },
+          },
+          options.bottomLabel ?? options.unit
         ),
       ]
     )
   }
 
-  private renderGaugeSvg(options: GaugeOptions) {
-    return h(
-      'svg',
-      {
-        viewBox: '0 0 160 160',
-        style: {
-          position: 'absolute',
-          inset: '0',
-          width: '100%',
-          height: '100%',
-        },
-      },
-      [
-        h('circle', {
-          cx: '80',
-          cy: '80',
-          r: '58',
-          fill: 'none',
-          stroke: 'rgba(255,255,255,0.1)',
-          'stroke-width': '12',
-          'stroke-linecap': 'round',
-          'stroke-dasharray': '276 365',
-          transform: 'rotate(132 80 80)',
-        }),
-        h('circle', {
-          cx: '80',
-          cy: '80',
-          r: '58',
-          fill: 'none',
-          stroke: options.color,
-          'stroke-width': '12',
-          'stroke-linecap': 'round',
-          'stroke-dasharray': '276 365',
-          'stroke-dashoffset': options.dashOffset,
-          transform: 'rotate(132 80 80)',
-          style: {
-            filter: `drop-shadow(0 0 5px ${options.color})`,
-            transition: 'stroke-dashoffset 90ms linear',
-          },
-        }),
-        h('circle', {
-          cx: '80',
-          cy: '80',
-          r: '43',
-          fill: 'rgba(0,0,0,0.2)',
-          stroke: 'rgba(255,255,255,0.1)',
-        }),
-      ]
-    )
+  private renderScaleRing() {
+    return h('circle', {
+      cx: CENTER,
+      cy: CENTER,
+      r: '59',
+      fill: 'rgba(0,0,0,0.16)',
+      stroke: 'rgba(255,255,255,0.1)',
+      'stroke-width': '2',
+    })
   }
 
-  private centerValueStyle(size: number) {
-    return {
-      fontSize: `${size}px`,
-      fontWeight: '900',
-      lineHeight: '0.92',
+  private renderTicks(options: AnalogGaugeOptions) {
+    const ticks = []
+    const totalTicks = Math.round(options.maxValue / options.minorStep)
+
+    for (let i = 0; i <= totalTicks; i++) {
+      const value = i * options.minorStep
+      const isMajor = Math.abs(value / options.majorStep - Math.round(value / options.majorStep)) < 0.001
+      const angle = this.valueToAngle(value, options.maxValue)
+      const tickColor = options.dangerFrom && value >= options.dangerFrom
+        ? '#ff6b55'
+        : 'rgba(255,255,255,0.78)'
+      const outer = this.pointOnGauge(angle, 60)
+      const inner = this.pointOnGauge(angle, isMajor ? 49 : 54)
+
+      ticks.push(
+        h('line', {
+          x1: outer.x,
+          y1: outer.y,
+          x2: inner.x,
+          y2: inner.y,
+          stroke: tickColor,
+          'stroke-width': isMajor ? 2.4 : 1.1,
+          'stroke-linecap': 'round',
+        })
+      )
+
+      if (isMajor) {
+        const labelPoint = this.pointOnGauge(angle, 38)
+        ticks.push(
+          h(
+            'text',
+            {
+              x: labelPoint.x,
+              y: labelPoint.y,
+              fill: tickColor,
+              'font-size': options.maxValue <= 10 ? '8' : '7',
+              'font-weight': '800',
+              'text-anchor': 'middle',
+              'dominant-baseline': 'middle',
+            },
+            String(Math.round(value))
+          )
+        )
+      }
     }
+
+    return ticks
   }
 
-  private centerUnitStyle() {
-    return {
-      fontSize: '11px',
-      letterSpacing: '0.12em',
+  private renderDangerArc(options: AnalogGaugeOptions) {
+    if (!options.dangerFrom) return null
+
+    const start = this.valueToAngle(options.dangerFrom, options.maxValue)
+    const end = this.valueToAngle(options.maxValue, options.maxValue)
+    const startPoint = this.pointOnGauge(start, 63)
+    const endPoint = this.pointOnGauge(end, 63)
+    const largeArc = end - start > 180 ? 1 : 0
+
+    return h('path', {
+      d: `M ${startPoint.x} ${startPoint.y} A 63 63 0 ${largeArc} 1 ${endPoint.x} ${endPoint.y}`,
+      fill: 'none',
+      stroke: '#ff6b55',
+      'stroke-width': '4',
+      'stroke-linecap': 'round',
       opacity: '0.72',
+    })
+  }
+
+  private renderNeedle(angle: number, color: string) {
+    const tip = this.pointOnGauge(angle, 50)
+    const tail = this.pointOnGauge(angle + 180, 12)
+
+    return h('g', { style: { transition: 'transform 80ms linear' } }, [
+      h('line', {
+        x1: tail.x,
+        y1: tail.y,
+        x2: tip.x,
+        y2: tip.y,
+        stroke: color,
+        'stroke-width': '3',
+        'stroke-linecap': 'round',
+        style: {
+          filter: `drop-shadow(0 0 4px ${color})`,
+        },
+      }),
+    ])
+  }
+
+  private valueToAngle(value: number, maxValue: number): number {
+    return START_ANGLE + (value / maxValue) * SWEEP_ANGLE
+  }
+
+  private pointOnGauge(angleDeg: number, radius: number): { x: number; y: number } {
+    const radians = THREE.MathUtils.degToRad(angleDeg - 90)
+
+    return {
+      x: CENTER + Math.cos(radians) * radius,
+      y: CENTER + Math.sin(radians) * radius,
     }
   }
 }

@@ -1,6 +1,6 @@
 # Cars Game
 
-Browser racing game with a drivable Ford Mustang, generated race track, AI opponents, lap timing, minimap, textured world, and speed-feel camera effects.
+Browser racing game with a drivable Ford Mustang, generated race track, competitive AI opponents, lap timing, minimap, textured world, and speed-feel camera effects.
 
 ## Demo
 
@@ -22,9 +22,11 @@ GitHub Pages: https://grischenko-v.github.io/cars-game/
 
 - Generated closed racing track
 - Player car physics with steering, drifting, braking, traction loss, and gear shifting
-- Two AI opponents with standings and collision physics
+- Six AI opponents with standings, racing-line logic, and collision physics
+- Seven-slot start grid; the player starts from the last row
 - Lap counter, stopwatch, lap times, and restart after finish
 - Minimap with all cars
+- Analog speedometer and tachometer
 - Textured asphalt, grass, trees, houses, rocks, sand, and dirt patches
 - Dynamic camera FOV and speed-line overlay for stronger speed perception
 

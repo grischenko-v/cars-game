@@ -8,10 +8,11 @@ This project is racing game.
 - TypeScript
 - Three.js
 - GLB model loading (GLTFLoader)
+- Vue runtime DOM for reactive HUD/standings widgets
 - Keyboard-based car movement
 - Mouse-based camera orbit (OrbitControls)
 
-The app renders a drivable car with a follow/target camera and basic physics-like movement.
+The app renders a drivable car with a follow/target camera, analog instruments, lap/race UI, generated scenery, and multiple AI opponents.
 
 ---
 
@@ -30,9 +31,13 @@ The app renders a drivable car with a follow/target camera and basic physics-lik
       FollowCameraController.ts
     /input
       KeyboardInput.ts
+    /ai
+      OpponentDriver.ts
     /ui
       HudView.ts
       MinimapView.ts
+      PositionLabelView.ts
+      StandingsView.ts
   /domain
     /car
       Car.ts
@@ -48,7 +53,9 @@ The app renders a drivable car with a follow/target camera and basic physics-lik
       SpatialHashGrid.ts
   /infrastructure
     /effects
+      CarShadow.ts
       SkidTrailRenderer.ts
+      SpeedLinesOverlay.ts
     /graphics
       CarView.ts
       RoadMeshFactory.ts
@@ -75,13 +82,14 @@ tsconfig.json
 - `src/main.ts` is the composition root and game loop. Keep it focused on wiring dependencies and orchestration; avoid adding UI, rendering setup, input listeners, or procedural mesh factories here.
 - `src/main.ts` also contains surface-dependent driving penalties: speed and velocity are intentionally reduced on shoulder, apron, and grass so leaving the asphalt has a gameplay cost.
 - `src/application/input/KeyboardInput.ts` owns browser keyboard events and exposes a small `KeyState` read model.
-- `src/application/ai/OpponentDriver.ts` owns AI driving decisions for non-player cars. Keep AI target selection and speed limiting here instead of hardcoding opponent movement in `main.ts`.
+- `src/application/ai/OpponentDriver.ts` owns AI driving decisions for non-player cars. Keep AI target selection, racing-line behavior, braking, and speed limiting here instead of hardcoding opponent movement in `main.ts`.
 - `src/application/config/QualitySettings.ts` owns performance/quality knobs such as pixel ratio, shadow size, terrain density, and decoration draw distance.
 - `src/application/camera/FollowCameraController.ts` owns OrbitControls and follow-camera behavior. Do not put OrbitControls event handling back into `main.ts`.
-- `src/application/ui/HudView.ts`, `src/application/ui/LoadingView.ts`, `src/application/ui/MinimapView.ts`, `src/application/ui/PositionLabelView.ts`, and `src/application/ui/StandingsView.ts` are presenters/views for DOM UI and canvas UI.
+- `src/application/ui/HudView.ts`, `src/application/ui/LoadingView.ts`, `src/application/ui/MinimapView.ts`, `src/application/ui/PositionLabelView.ts`, and `src/application/ui/StandingsView.ts` are presenters/views for DOM UI and canvas UI. `HudView` and `StandingsView` use Vue runtime DOM instead of manual `innerHTML` updates.
 - `src/infrastructure/rendering/GameRenderer.ts` creates the Three.js scene, camera, renderer, sky, resize behavior, and render facade.
 - `src/infrastructure/rendering/LightingFactory.ts` owns scene light creation and shadow settings.
 - `src/infrastructure/effects/SkidTrailRenderer.ts` owns skid mark geometry and rendering.
+- `src/infrastructure/effects/SpeedLinesOverlay.ts` owns the 2D canvas speed-line overlay; keep speed-feel overlay code there instead of adding drawing code to `main.ts`.
 - `src/infrastructure/graphics/CarView.ts` is the adapter/facade around the loaded `THREE.Group`. Do not access `THREE.Object3D.position` for the car directly from `main.ts`; use `CarView` methods such as `copyPosition`, `setPosition`, `translateXZ`, and `addScaledVector`.
 - `src/world/Road.ts` is a facade over the road domain model, generation strategy, and mesh factory. Keep public road queries here, but put generation rules into `src/domain/road/` and Three.js mesh construction into `src/infrastructure/graphics/`.
 - `src/domain/road/TrackModel.ts` contains road domain queries such as closest band data, start sector checks, and surface data.
@@ -109,6 +117,10 @@ tsconfig.json
 ## 🤖 Agent Notes
 
 - Prefer keeping `main.ts` as an orchestration layer and moving domain-specific logic into focused modules.
+- The road start grid currently renders seven slots: six opponents plus the player. Keep `RoadMeshFactory.buildStartGridGeometry()` aligned with `createOpponents()` and `PLAYER_START_GRID_OFFSET`.
+- The player intentionally starts from the last grid row; keep opponent grid offsets ahead of `PLAYER_START_GRID_OFFSET` unless explicitly changing race balance.
+- The game currently creates six AI opponents. If changing opponent count, review start-grid offsets, minimap markers, position labels, and collision density together.
+- HUD instruments are analog Vue-rendered gauges. Keep speed/RPM presentation in `HudView` rather than formatting instrument DOM in `main.ts`.
 - The road is now generated as a closed random loop with multiple straights and turns, so decoration placement should query the road shape rather than assume an oval.
 - When changing road height or width, also review the terrain cut parameters in `Road.ts`/`Terrain.ts`; otherwise asphalt can visually sink into the grass again.
 - If road/grass intersections reappear, first adjust `terrainHardMargin`, `terrainShoulderMargin`, `apronWidth`, terrain mesh density, terrain polygon offset, and `roadY/shoulderY/apronY` separation before changing gameplay code.

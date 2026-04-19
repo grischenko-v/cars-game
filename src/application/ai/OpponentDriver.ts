@@ -14,6 +14,8 @@ export interface OpponentDriverConfig {
   maxSpeed: number
   maxSteer: number
   speedFactor: number
+  aggression?: number
+  lineBias?: number
 }
 
 export class OpponentDriver {
@@ -33,8 +35,9 @@ export class OpponentDriver {
 
     const roadBand = road.getBandData(position.x, position.z)
     const speedRatio = clamp(car.absSpeed / this.config.maxSpeed, 0, 1)
-    const lookAhead = THREE.MathUtils.lerp(12, 32, speedRatio)
-    const curveProbe = THREE.MathUtils.lerp(20, 38, speedRatio)
+    const aggression = this.config.aggression ?? 0.7
+    const lookAhead = THREE.MathUtils.lerp(18, 46, speedRatio)
+    const curveProbe = THREE.MathUtils.lerp(34, 76, speedRatio)
 
     road.sampleCenterlineByDistance(roadBand.distanceAlong + lookAhead, this.target, this.tangent)
     road.sampleCenterlineByDistance(
@@ -44,28 +47,53 @@ export class OpponentDriver {
     )
 
     const turnSign = this.tangent.x * this.nextTangent.z - this.tangent.z * this.nextTangent.x
-    const curveAmount = clamp(Math.abs(turnSign) * 3.1, 0, 1)
-    const insideOffset = road.trackHalfWidth * 0.38 * curveAmount * (turnSign < 0 ? 1 : -1)
+    const tangentDot = clamp(this.tangent.dot(this.nextTangent), -1, 1)
+    const curveAngle = Math.atan2(turnSign, tangentDot)
+    const curveAmount = clamp(Math.abs(curveAngle) / 0.72, 0, 1)
+    const insideSign = turnSign < 0 ? 1 : -1
+    const insideOffset =
+      road.trackHalfWidth *
+      (0.28 + aggression * 0.2) *
+      curveAmount *
+      insideSign
+    const laneBias = road.trackHalfWidth * (this.config.lineBias ?? 0) * 0.28
 
     this.side.set(-this.tangent.z, 0, this.tangent.x).normalize()
-    this.target.addScaledVector(this.side, insideOffset)
+    this.target.addScaledVector(this.side, insideOffset + laneBias)
     this.toTarget.subVectors(this.target, position)
 
     const desiredHeading = Math.atan2(this.toTarget.x, this.toTarget.z)
     const headingError =
       THREE.MathUtils.euclideanModulo(desiredHeading - car.heading + Math.PI, Math.PI * 2) -
       Math.PI
-    const steer = clamp((headingError * 1.55) / this.config.maxSteer, -1, 1)
-    const curveSpeedFactor = THREE.MathUtils.lerp(1, 0.62, curveAmount)
-    const headingSpeedFactor = THREE.MathUtils.lerp(1, 0.62, clamp(Math.abs(headingError) / 0.9, 0, 1))
+    this.side.set(-roadBand.tangent.z, 0, roadBand.tangent.x).normalize()
+    const lateralError =
+      this.side.dot(this.toTarget.subVectors(position, roadBand.nearestPoint)) /
+      Math.max(road.trackHalfWidth, 0.001)
+    const steer = clamp(
+      (headingError * (1.65 + aggression * 0.45) - lateralError * 0.42) /
+        this.config.maxSteer,
+      -1,
+      1
+    )
+    const curveSpeedFactor = THREE.MathUtils.lerp(1, 0.74, curveAmount)
+    const headingSpeedFactor = THREE.MathUtils.lerp(
+      1,
+      0.72,
+      clamp(Math.abs(headingError) / 0.95, 0, 1)
+    )
     const speedFactor = this.config.speedFactor * curveSpeedFactor * headingSpeedFactor
     const targetSpeed = this.config.maxSpeed * speedFactor
-    const throttle = car.speed < targetSpeed ? 1 : -0.6
+    const overspeed = car.speed - targetSpeed
+    const throttle = overspeed > 1.2 ? -0.72 : 1
+    const brake =
+      overspeed > 3.2 ||
+      (curveAmount > 0.72 && speedRatio > 0.58 && Math.abs(headingError) > 0.38)
 
     return {
       throttle,
       steer,
-      brake: false,
+      brake,
       speedFactor,
     }
   }

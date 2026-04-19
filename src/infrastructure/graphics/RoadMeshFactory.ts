@@ -312,10 +312,17 @@ export class RoadMeshFactory {
     const slotLength = 6.2
     const slotWidth = 3.2
     const lineWidth = 0.22
+    const firstOpponentOffset = -5.1
+    const rowSpacing = 6.4
+    const lateralOffset = track.roadWidth * 0.24
     const slotCenters = [
-      { distanceOffset: -5.1, lateralOffset: 0 },
-      { distanceOffset: -12.2, lateralOffset: -track.roadWidth * 0.24 },
-      { distanceOffset: -12.2, lateralOffset: track.roadWidth * 0.24 },
+      { distanceOffset: firstOpponentOffset, lateralOffset: -lateralOffset },
+      { distanceOffset: firstOpponentOffset, lateralOffset },
+      { distanceOffset: firstOpponentOffset - rowSpacing, lateralOffset: 0 },
+      { distanceOffset: firstOpponentOffset - rowSpacing * 2, lateralOffset },
+      { distanceOffset: firstOpponentOffset - rowSpacing * 2, lateralOffset: -lateralOffset },
+      { distanceOffset: firstOpponentOffset - rowSpacing * 3, lateralOffset: 0 },
+      { distanceOffset: firstOpponentOffset - rowSpacing * 4, lateralOffset: 0 },
     ]
 
     for (const slot of slotCenters) {

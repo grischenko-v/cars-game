@@ -99,8 +99,8 @@ const APRON_VELOCITY_DAMP = 0.975
 const GRASS_VELOCITY_DAMP = 0.955
 const COUNTDOWN_SECONDS = 3
 const COUNTDOWN_GO_HOLD_SECONDS = 0.65
-const PLAYER_START_GRID_OFFSET = -5.1
-const OPPONENT_START_GRID_OFFSET = -12.2
+const PLAYER_START_GRID_OFFSET = -30.7
+const OPPONENT_START_GRID_OFFSET = -5.1
 const OPPONENT_LATERAL_OFFSET_FACTOR = 0.24
 
 type GamePhase = 'loading' | 'countdown' | 'running' | 'finished'
@@ -224,9 +224,10 @@ loader.load(
     positionLabelTargets.length = 0
     hasRankedCompetition = false
     standingsUpdateTimer = 0
+    createOpponents(carView)
     registerCompetitor({
       id: 'player',
-      name: `${playerName} (ты)`,
+      name: playerName,
       isPlayer: true,
       car: carAggregate,
       view: carView,
@@ -234,7 +235,6 @@ loader.load(
       driver: null,
       minimapColor: '#ff7b54',
     })
-    createOpponents(carView)
 
     cameraRig.focusOn(carView, carAggregate.heading)
     startCountdown()
@@ -288,15 +288,63 @@ function createOpponents(sourceView: CarView): void {
   const opponentSettings = [
     {
       id: 'opponent-1',
-      speedFactor: 0.8,
+      speedFactor: 1,
+      aggression: 0.94,
+      lineBias: -0.45,
+      distanceOffset: OPPONENT_START_GRID_OFFSET,
       lateralOffset: -road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0xb9413f,
+      minimapColor: '#e05249',
     },
     {
       id: 'opponent-2',
-      speedFactor: 0.5,
+      speedFactor: 0.98,
+      aggression: 0.88,
+      lineBias: 0.4,
+      distanceOffset: OPPONENT_START_GRID_OFFSET,
       lateralOffset: road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0x2f78c4,
+      minimapColor: '#4e9dff',
+    },
+    {
+      id: 'opponent-3',
+      speedFactor: 0.97,
+      aggression: 0.82,
+      lineBias: -0.1,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - 6.4,
+      lateralOffset: 0,
+      tint: 0xe5b84a,
+      minimapColor: '#f3d45a',
+    },
+    {
+      id: 'opponent-4',
+      speedFactor: 0.95,
+      aggression: 0.76,
+      lineBias: 0.55,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - 12.8,
+      lateralOffset: road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
+      tint: 0x5fbf78,
+      minimapColor: '#7bd88f',
+    },
+    {
+      id: 'opponent-5',
+      speedFactor: 0.93,
+      aggression: 0.8,
+      lineBias: -0.55,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - 12.8,
+      lateralOffset: -road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
+      tint: 0xb66ce0,
+      minimapColor: '#c58cff',
+    },
+    {
+      id: 'opponent-6',
+      speedFactor: 0.92,
+      aggression: 0.72,
+      lineBias: 0.08,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - 19.2,
+      lateralOffset: 0,
+      tint: 0xf08a52,
+      minimapColor: '#ff9f6e',
     },
   ]
 
@@ -308,7 +356,7 @@ function createOpponents(sourceView: CarView): void {
     opponentView.tintMaterials(settings.tint, 0.44)
     opponentView.addTo(scene)
     opponentView.enableShadows()
-    placeCarOnStartGrid(opponentView, OPPONENT_START_GRID_OFFSET, settings.lateralOffset)
+    placeCarOnStartGrid(opponentView, settings.distanceOffset, settings.lateralOffset)
     snapCarToSurface(opponentView, OPPONENT_RIDE_HEIGHT_EXTRA)
     opponentCar.setHeading(opponentView.getYaw())
 
@@ -323,8 +371,10 @@ function createOpponents(sourceView: CarView): void {
         maxSpeed: MAX_FORWARD_SPEED,
         maxSteer: MAX_STEER,
         speedFactor: settings.speedFactor,
+        aggression: settings.aggression,
+        lineBias: settings.lineBias,
       }),
-      minimapColor: settings.id === 'opponent-1' ? '#e05249' : '#4e9dff',
+      minimapColor: settings.minimapColor,
     })
   }
 }
