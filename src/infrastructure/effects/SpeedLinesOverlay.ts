@@ -9,6 +9,7 @@ export class SpeedLinesOverlay {
   private intensity = 0
   private time = 0
   private pixelRatio = 1
+  private hasVisibleFrame = false
 
   constructor(private readonly parent: HTMLElement = document.body) {
     const canvas = document.createElement('canvas')
@@ -42,6 +43,16 @@ export class SpeedLinesOverlay {
       expLerpFactor(5.5, delta)
     )
     this.time += delta * (1 + this.intensity * 5)
+
+    if (this.intensity < 0.015 && targetIntensity < 0.015) {
+      if (this.hasVisibleFrame) {
+        this.context.clearRect(0, 0, this.canvas.width, this.canvas.height)
+        this.hasVisibleFrame = false
+      }
+
+      return
+    }
+
     this.draw()
   }
 
@@ -55,7 +66,12 @@ export class SpeedLinesOverlay {
     const ctx = this.context
     ctx.clearRect(0, 0, width, height)
 
-    if (this.intensity < 0.015) return
+    if (this.intensity < 0.015) {
+      this.hasVisibleFrame = false
+      return
+    }
+
+    this.hasVisibleFrame = true
 
     const dpr = this.pixelRatio
     const logicalWidth = width / dpr

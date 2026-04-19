@@ -10,7 +10,9 @@ import { OpponentDriver } from './application/ai/OpponentDriver'
 import { HudView } from './application/ui/HudView'
 import { LoadingView } from './application/ui/LoadingView'
 import { MinimapView } from './application/ui/MinimapView'
+import type { MinimapCarMarker } from './application/ui/MinimapView'
 import { PositionLabelView } from './application/ui/PositionLabelView'
+import type { PositionLabelTarget } from './application/ui/PositionLabelView'
 import { StandingsView } from './application/ui/StandingsView'
 import { CarShadow } from './infrastructure/effects/CarShadow'
 import { SkidTrailRenderer } from './infrastructure/effects/SkidTrailRenderer'
@@ -24,6 +26,7 @@ import { Road } from './world/Road'
 import { Terrain } from './world/Terrain'
 import { Decorations } from './world/Decorations'
 import { RaceStandings } from './domain/race/RaceStandings'
+import type { StandingEntry } from './domain/race/RaceStandings'
 
 const gameRenderer = new GameRenderer()
 const { scene, camera, renderer } = gameRenderer
@@ -140,13 +143,31 @@ const tmpRollAxis = new THREE.Vector3(0, 0, 1)
 const tmpPitchAxis = new THREE.Vector3(1, 0, 0)
 const surfaceCache = new Map<string, RoadSurfaceData>()
 const competitors: Competitor[] = []
+const competitorById = new Map<string, Competitor>()
+const minimapMarkers: MinimapCarMarker[] = []
+const positionLabelTargets: PositionLabelTarget[] = []
+const standingEntries: StandingEntry[] = []
 const usedNames = new Set<string>()
 const playerName = nameGenerator.nextName(usedNames)
+const STANDINGS_UPDATE_INTERVAL = 0.12
+let standingsUpdateTimer = 0
+let hasRankedCompetition = false
 
 const loader = new GLTFLoader()
 let gamePhase: GamePhase = 'loading'
 let countdownTime = COUNTDOWN_SECONDS
 let goHoldTime = 0
+
+function registerCompetitor(competitor: Competitor): void {
+  competitors.push(competitor)
+  competitorById.set(competitor.id, competitor)
+  minimapMarkers.push({
+    car: competitor.view,
+    heading: competitor.car.heading,
+    color: competitor.minimapColor,
+    isPlayer: competitor.isPlayer,
+  })
+}
 
 loadingView.showLoading(null)
 
@@ -198,7 +219,12 @@ loader.load(
     carAggregate.setHeading(carView.getYaw())
     carAggregate.getForward(tmpVecA)
     competitors.length = 0
-    competitors.push({
+    competitorById.clear()
+    minimapMarkers.length = 0
+    positionLabelTargets.length = 0
+    hasRankedCompetition = false
+    standingsUpdateTimer = 0
+    registerCompetitor({
       id: 'player',
       name: `${playerName} (ты)`,
       isPlayer: true,
@@ -286,7 +312,7 @@ function createOpponents(sourceView: CarView): void {
     snapCarToSurface(opponentView, OPPONENT_RIDE_HEIGHT_EXTRA)
     opponentCar.setHeading(opponentView.getYaw())
 
-    competitors.push({
+    registerCompetitor({
       id: settings.id,
       name: nameGenerator.nextName(usedNames),
       isPlayer: false,
@@ -830,43 +856,54 @@ function snapCompetitorsToSurface(): void {
 }
 
 function getMinimapMarkers() {
-  return competitors.map((competitor) => ({
-    car: competitor.view,
-    heading: competitor.car.heading,
-    color: competitor.minimapColor,
-    isPlayer: competitor.isPlayer,
-  }))
+  for (let i = 0; i < competitors.length; i++) {
+    minimapMarkers[i].heading = competitors[i].car.heading
+  }
+
+  return minimapMarkers
 }
 
-function updateCompetitionUi(): void {
+function updateCompetitionUi(delta: number): void {
   if (competitors.length === 0) return
 
-  const ranked = raceStandings.rank(
-    competitors.map((competitor) =>
-      raceStandings.fromSnapshot(
-        competitor.id,
-        competitor.name,
-        competitor.race.snapshot(),
-        competitor.isPlayer
-      )
-    )
-  )
-  standingsView.update(ranked)
-  positionLabelView.update(
-    ranked.map((entry) => {
-      const competitor = competitors.find((item) => item.id === entry.id)
+  standingsUpdateTimer -= delta
 
-      return {
+  if (standingsUpdateTimer <= 0 || !hasRankedCompetition) {
+    standingsUpdateTimer = STANDINGS_UPDATE_INTERVAL
+    standingEntries.length = 0
+
+    for (const competitor of competitors) {
+      standingEntries.push(
+        raceStandings.fromSnapshot(
+          competitor.id,
+          competitor.name,
+          competitor.race.snapshot(),
+          competitor.isPlayer
+        )
+      )
+    }
+
+    const ranked = raceStandings.rank(standingEntries)
+
+    positionLabelTargets.length = 0
+
+    for (const entry of ranked) {
+      const competitor = competitorById.get(entry.id)
+
+      positionLabelTargets.push({
         id: entry.id,
         name: entry.name,
         place: entry.place,
         view: competitor ? competitor.view : competitors[0].view,
         isPlayer: entry.isPlayer,
-      }
-    }),
-    camera,
-    renderer
-  )
+      })
+    }
+
+    standingsView.update(ranked)
+    hasRankedCompetition = true
+  }
+
+  positionLabelView.update(positionLabelTargets, camera, renderer)
 }
 
 function animate(): void {
@@ -885,7 +922,7 @@ function animate(): void {
   updateOpponents(delta)
   resolveCompetitorCollisions()
   snapCompetitorsToSurface()
-  updateCompetitionUi()
+  updateCompetitionUi(delta)
   skidTrail.update(carView, carAggregate, keys, road, terrain)
   cameraRig.update(carView, carAggregate.heading, carAggregate.speed, delta)
   speedLines.update(carAggregate.speed, delta)

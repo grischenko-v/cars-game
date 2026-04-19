@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { CarView } from '../../infrastructure/graphics/CarView'
+import type { TrackBounds } from '../../domain/road/TrackModel'
 import type { Road } from '../../world/Road'
 
 interface MapPoint {
@@ -16,17 +17,33 @@ export interface MinimapCarMarker {
 
 export class MinimapView {
   private readonly canvas: HTMLCanvasElement
+  private readonly trackCanvas: HTMLCanvasElement
   private readonly context: CanvasRenderingContext2D | null
+  private readonly trackContext: CanvasRenderingContext2D | null
   private readonly startVector = new THREE.Vector3()
   private readonly carPosition = new THREE.Vector3()
+  private readonly padding = 22
+  private readonly bounds: TrackBounds
+  private readonly mapScale: number
 
   constructor(
     private readonly road: Road,
     parent: HTMLElement = document.body
   ) {
+    this.bounds = this.road.trackBounds
+    const spanX = Math.max(this.bounds.maxX - this.bounds.minX, 1)
+    const spanZ = Math.max(this.bounds.maxZ - this.bounds.minZ, 1)
+    this.mapScale = Math.min(
+      (220 - this.padding * 2) / spanX,
+      (220 - this.padding * 2) / spanZ
+    )
+
     this.canvas = document.createElement('canvas')
+    this.trackCanvas = document.createElement('canvas')
     this.canvas.width = 220
     this.canvas.height = 220
+    this.trackCanvas.width = this.canvas.width
+    this.trackCanvas.height = this.canvas.height
     this.canvas.style.position = 'fixed'
     this.canvas.style.top = '16px'
     this.canvas.style.right = '16px'
@@ -41,6 +58,8 @@ export class MinimapView {
     parent.appendChild(this.canvas)
 
     this.context = this.canvas.getContext('2d')
+    this.trackContext = this.trackCanvas.getContext('2d')
+    this.drawStaticTrack()
   }
 
   draw(markers: MinimapCarMarker[]): void {
@@ -48,30 +67,14 @@ export class MinimapView {
 
     const width = this.canvas.width
     const height = this.canvas.height
-    const padding = 22
-    const bounds = this.road.trackBounds
-    const spanX = Math.max(bounds.maxX - bounds.minX, 1)
-    const spanZ = Math.max(bounds.maxZ - bounds.minZ, 1)
-    const scale = Math.min(
-      (width - padding * 2) / spanX,
-      (height - padding * 2) / spanZ
-    )
-    const worldToMap = (x: number, z: number): MapPoint => ({
-      x: padding + (x - bounds.minX) * scale,
-      y: height - padding - (z - bounds.minZ) * scale,
-    })
 
     this.context.clearRect(0, 0, width, height)
-    this.context.fillStyle = 'rgba(24, 28, 34, 0.88)'
-    this.context.fillRect(0, 0, width, height)
-
-    this.drawTrack(worldToMap, scale)
-    this.drawStart(worldToMap)
+    this.context.drawImage(this.trackCanvas, 0, 0)
 
     for (const marker of markers) {
       marker.car.copyPosition(this.carPosition)
       this.drawCar(
-        worldToMap(this.carPosition.x, this.carPosition.z),
+        this.worldToMap(this.carPosition.x, this.carPosition.z),
         marker.heading,
         marker.color,
         marker.isPlayer
@@ -79,51 +82,66 @@ export class MinimapView {
     }
   }
 
-  private drawTrack(worldToMap: (x: number, z: number) => MapPoint, scale: number): void {
-    if (!this.context || this.road.centerline.length <= 1) return
+  private drawStaticTrack(): void {
+    if (!this.trackContext) return
 
-    this.context.lineCap = 'round'
-    this.context.lineJoin = 'round'
+    const width = this.trackCanvas.width
+    const height = this.trackCanvas.height
+
+    this.trackContext.clearRect(0, 0, width, height)
+    this.trackContext.fillStyle = 'rgba(24, 28, 34, 0.88)'
+    this.trackContext.fillRect(0, 0, width, height)
+
+    this.drawTrack(this.trackContext)
+    this.drawStart(this.trackContext)
+  }
+
+  private worldToMap(x: number, z: number): MapPoint {
+    return {
+      x: this.padding + (x - this.bounds.minX) * this.mapScale,
+      y: this.canvas.height - this.padding - (z - this.bounds.minZ) * this.mapScale,
+    }
+  }
+
+  private drawTrack(context: CanvasRenderingContext2D): void {
+    if (this.road.centerline.length <= 1) return
+
+    context.lineCap = 'round'
+    context.lineJoin = 'round'
     this.strokeCenterline(
-      worldToMap,
+      context,
       '#8b7d62',
-      (this.road.roadWidth + this.road.shoulderWidth * 2) * scale
+      (this.road.roadWidth + this.road.shoulderWidth * 2) * this.mapScale
     )
-    this.strokeCenterline(worldToMap, '#596067', this.road.roadWidth * scale)
+    this.strokeCenterline(context, '#596067', this.road.roadWidth * this.mapScale)
   }
 
   private strokeCenterline(
-    worldToMap: (x: number, z: number) => MapPoint,
+    context: CanvasRenderingContext2D,
     color: string,
     lineWidth: number
   ): void {
-    if (!this.context) return
-
-    const context = this.context
-
     context.beginPath()
     this.road.centerline.forEach((point, index) => {
-      const mapPoint = worldToMap(point.x, point.z)
+      const mapPoint = this.worldToMap(point.x, point.z)
       if (index === 0) context.moveTo(mapPoint.x, mapPoint.y)
       else context.lineTo(mapPoint.x, mapPoint.y)
     })
 
-    const firstPoint = worldToMap(this.road.centerline[0].x, this.road.centerline[0].z)
+    const firstPoint = this.worldToMap(this.road.centerline[0].x, this.road.centerline[0].z)
     context.lineTo(firstPoint.x, firstPoint.y)
     context.strokeStyle = color
     context.lineWidth = lineWidth
     context.stroke()
   }
 
-  private drawStart(worldToMap: (x: number, z: number) => MapPoint): void {
-    if (!this.context) return
-
+  private drawStart(context: CanvasRenderingContext2D): void {
     const startVector = this.road.getCenterPointAtAngle(this.road.startAngle, this.startVector)
-    const startPoint = worldToMap(startVector.x, startVector.z)
-    this.context.beginPath()
-    this.context.arc(startPoint.x, startPoint.y, 4, 0, Math.PI * 2)
-    this.context.fillStyle = '#f3e7a4'
-    this.context.fill()
+    const startPoint = this.worldToMap(startVector.x, startVector.z)
+    context.beginPath()
+    context.arc(startPoint.x, startPoint.y, 4, 0, Math.PI * 2)
+    context.fillStyle = '#f3e7a4'
+    context.fill()
   }
 
   private drawCar(carMap: MapPoint, heading: number, color: string, isPlayer: boolean): void {

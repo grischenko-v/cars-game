@@ -11,16 +11,21 @@ export interface PositionLabelTarget {
 
 export class PositionLabelView {
   private readonly labels = new Map<string, HTMLDivElement>()
+  private readonly activeIds = new Set<string>()
   private readonly worldPosition = new THREE.Vector3()
   private readonly screenPosition = new THREE.Vector3()
 
   constructor(private readonly parent: HTMLElement = document.body) {}
 
   update(targets: PositionLabelTarget[], camera: THREE.Camera, renderer: THREE.WebGLRenderer): void {
-    const activeIds = new Set(targets.map((target) => target.id))
+    this.activeIds.clear()
+
+    for (const target of targets) {
+      this.activeIds.add(target.id)
+    }
 
     for (const [id, label] of this.labels) {
-      if (!activeIds.has(id)) {
+      if (!this.activeIds.has(id)) {
         label.remove()
         this.labels.delete(id)
       }
@@ -42,10 +47,18 @@ export class PositionLabelView {
 
       const x = (this.screenPosition.x * 0.5 + 0.5) * rect.width + rect.left
       const y = (-this.screenPosition.y * 0.5 + 0.5) * rect.height + rect.top
+      const nextText = `${target.place}. ${target.name}`
+      const nextBorderColor = target.isPlayer ? 'rgba(255,232,142,0.95)' : 'rgba(255,255,255,0.55)'
 
       label.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`
-      label.textContent = `${target.place}. ${target.name}`
-      label.style.borderColor = target.isPlayer ? 'rgba(255,232,142,0.95)' : 'rgba(255,255,255,0.55)'
+
+      if (label.textContent !== nextText) {
+        label.textContent = nextText
+      }
+
+      if (label.style.borderColor !== nextBorderColor) {
+        label.style.borderColor = nextBorderColor
+      }
     }
   }
 

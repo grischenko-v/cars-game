@@ -49,6 +49,14 @@ export class HudView {
   }
 
   updateInstruments(kmh: number, rpm: number, gear: number): void {
+    if (
+      this.state.speed === kmh &&
+      this.state.gear === gear &&
+      Math.abs(this.state.rpm - rpm) < 35
+    ) {
+      return
+    }
+
     this.state.speed = kmh
     this.state.rpm = rpm
     this.state.gear = gear

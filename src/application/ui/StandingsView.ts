@@ -48,6 +48,8 @@ export class StandingsView {
   }
 
   update(entries: RankedStandingEntry[]): void {
+    if (this.hasSameEntries(entries)) return
+
     this.state.entries = entries
   }
 
@@ -59,6 +61,17 @@ export class StandingsView {
     lapTimes: number[],
     finished: boolean
   ): void {
+    if (
+      this.state.completedLaps === completedLaps &&
+      this.state.targetLaps === targetLaps &&
+      this.state.finished === finished &&
+      this.state.lapTimes.length === lapTimes.length &&
+      Math.abs(this.state.elapsedTime - elapsedTime) < 0.1 &&
+      Math.abs(this.state.currentLapTime - currentLapTime) < 0.1
+    ) {
+      return
+    }
+
     this.state.completedLaps = completedLaps
     this.state.targetLaps = targetLaps
     this.state.elapsedTime = elapsedTime
@@ -209,5 +222,20 @@ export class StandingsView {
     const minutes = Math.floor(seconds / 60)
     const remainingSeconds = seconds - minutes * 60
     return `${minutes}:${remainingSeconds.toFixed(2).padStart(5, '0')}`
+  }
+
+  private hasSameEntries(entries: RankedStandingEntry[]): boolean {
+    if (this.state.entries.length !== entries.length) return false
+
+    return entries.every((entry, index) => {
+      const current = this.state.entries[index]
+
+      return (
+        current.id === entry.id &&
+        current.place === entry.place &&
+        current.completedLaps === entry.completedLaps &&
+        current.finished === entry.finished
+      )
+    })
   }
 }

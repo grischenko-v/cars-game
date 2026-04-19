@@ -16,7 +16,7 @@ export interface RankedStandingEntry extends StandingEntry {
 
 export class RaceStandings {
   rank(entries: StandingEntry[]): RankedStandingEntry[] {
-    return [...entries]
+    return entries
       .sort((a, b) => {
         if (a.finished !== b.finished) return a.finished ? -1 : 1
         return b.raceDistance - a.raceDistance
