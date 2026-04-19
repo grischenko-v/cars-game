@@ -1,84 +1,229 @@
+import { createApp, h, reactive } from '@vue/runtime-dom'
+import type { VNode } from '@vue/runtime-dom'
+
+interface HudState {
+  speed: number
+  rpm: number
+  gear: number
+}
+
+interface GaugeOptions {
+  title: string
+  value: string
+  unit: string
+  color: string
+  dashOffset: number
+  center: VNode[]
+}
+
 export class HudView {
   private readonly element: HTMLDivElement
-  private speed = 0
-  private completedLaps = 0
-  private targetLaps = 0
-  private elapsedTime = 0
-  private currentLapTime = 0
-  private lapTimes: number[] = []
-  private finished = false
+  private readonly state = reactive<HudState>({
+    speed: 0,
+    rpm: 900,
+    gear: 1,
+  })
 
   constructor(parent: HTMLElement = document.body) {
     this.element = document.createElement('div')
     this.element.style.position = 'fixed'
-    this.element.style.left = '16px'
+    this.element.style.right = '16px'
     this.element.style.bottom = '16px'
-    this.element.style.padding = '10px 14px'
-    this.element.style.background = 'rgba(20,20,24,0.55)'
-    this.element.style.backdropFilter = 'blur(6px)'
+    this.element.style.width = '344px'
+    this.element.style.padding = '12px'
+    this.element.style.background = 'linear-gradient(145deg, rgba(13,15,18,0.72), rgba(32,36,40,0.56))'
+    this.element.style.backdropFilter = 'blur(8px)'
     this.element.style.color = '#fff'
     this.element.style.fontFamily = 'system-ui, sans-serif'
-    this.element.style.fontSize = '18px'
-    this.element.style.borderRadius = '12px'
+    this.element.style.fontSize = '15px'
+    this.element.style.border = '1px solid rgba(255,255,255,0.12)'
+    this.element.style.borderRadius = '22px'
+    this.element.style.boxShadow = '0 18px 44px rgba(0,0,0,0.34)'
     this.element.style.zIndex = '10'
     this.element.style.userSelect = 'none'
-    this.render()
     parent.appendChild(this.element)
+
+    createApp({
+      setup: () => () => this.render(),
+    }).mount(this.element)
   }
 
-  updateSpeed(kmh: number): void {
-    this.speed = kmh
-    this.render()
+  updateInstruments(kmh: number, rpm: number, gear: number): void {
+    this.state.speed = kmh
+    this.state.rpm = rpm
+    this.state.gear = gear
   }
 
-  updateRace(
-    completedLaps: number,
-    targetLaps: number,
-    elapsedTime: number,
-    currentLapTime: number,
-    lapTimes: number[],
-    finished: boolean
-  ): void {
-    this.completedLaps = completedLaps
-    this.targetLaps = targetLaps
-    this.elapsedTime = elapsedTime
-    this.currentLapTime = currentLapTime
-    this.lapTimes = lapTimes
-    this.finished = finished
-    this.render()
+  private render() {
+    const rpmRatio = Math.min(this.state.rpm / 7200, 1)
+    const rpmColor = rpmRatio > 0.86 ? '#ff6b55' : '#f3e7a4'
+    const speedRatio = Math.min(this.state.speed / 240, 1)
+
+    return h(
+      'div',
+      {
+        style: {
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '10px',
+        },
+      },
+      [
+        this.renderGauge({
+          title: 'SPEED',
+          value: String(this.state.speed),
+          unit: 'km/h',
+          color: '#85d7ff',
+          dashOffset: 276 - 276 * speedRatio,
+          center: [
+            h('div', { style: this.centerValueStyle(40) }, this.state.speed),
+            h('div', { style: this.centerUnitStyle() }, 'km/h'),
+          ],
+        }),
+        this.renderGauge({
+          title: 'TACH',
+          value: Math.round(this.state.rpm).toString(),
+          unit: 'rpm',
+          color: rpmColor,
+          dashOffset: 276 - 276 * rpmRatio,
+          center: [
+            h('div', { style: { ...this.centerValueStyle(34), color: rpmColor } }, this.state.gear),
+            h('div', { style: this.centerUnitStyle() }, 'GEAR'),
+            h(
+              'div',
+              { style: { marginTop: '3px', fontSize: '12px', opacity: '0.82' } },
+              Math.round(this.state.rpm)
+            ),
+          ],
+        }),
+      ]
+    )
   }
 
-  private render(): void {
-    const lapsText = this.targetLaps > 0 ? `<div>Круги: ${this.completedLaps}/${this.targetLaps}</div>` : ''
-    const timerText = this.targetLaps > 0
-      ? `
-        <div>Время: ${this.formatTime(this.elapsedTime)}</div>
-        <div>Текущий: ${this.finished ? '-' : this.formatTime(this.currentLapTime)}</div>
-      `
-      : ''
-    const lapTimesText = this.lapTimes.length > 0
-      ? `
-        <div style="margin-top: 6px; font-size: 14px; opacity: 0.9;">
-          ${this.lapTimes.map((time, index) => `Круг ${index + 1}: ${this.formatTime(time)}`).join('<br>')}
-        </div>
-      `
-      : ''
-    const finishText = this.finished
-      ? '<div style="margin-top: 6px; color: #f3e7a4;">Финиш! Enter / R - рестарт</div>'
-      : ''
-
-    this.element.innerHTML = `
-      <div>${this.speed} km/h</div>
-      ${lapsText}
-      ${timerText}
-      ${lapTimesText}
-      ${finishText}
-    `
+  private renderGauge(options: GaugeOptions) {
+    return h(
+      'div',
+      {
+        style: {
+          position: 'relative',
+          height: '150px',
+          borderRadius: '50%',
+          background:
+            'radial-gradient(circle at 50% 56%, rgba(255,255,255,0.12) 0 2px, transparent 3px), radial-gradient(circle at 50% 50%, rgba(6,7,9,0.98) 0 54%, rgba(37,42,47,0.94) 55% 68%, rgba(8,10,12,0.96) 70%)',
+          boxShadow:
+            'inset 0 12px 22px rgba(255,255,255,0.08), inset 0 -18px 34px rgba(0,0,0,0.7), 0 8px 18px rgba(0,0,0,0.32)',
+          overflow: 'hidden',
+        },
+      },
+      [
+        this.renderGaugeSvg(options),
+        h(
+          'div',
+          {
+            style: {
+              position: 'absolute',
+              inset: '0',
+              display: 'grid',
+              placeItems: 'center',
+              textAlign: 'center',
+              textShadow: '0 2px 10px rgba(0,0,0,0.78)',
+            },
+          },
+          [
+            h('div', [
+              h(
+                'div',
+                { style: { fontSize: '10px', letterSpacing: '0.16em', opacity: '0.54' } },
+                options.title
+              ),
+              ...options.center,
+            ]),
+          ]
+        ),
+        h(
+          'div',
+          {
+            style: {
+              position: 'absolute',
+              left: '50%',
+              bottom: '17px',
+              transform: 'translateX(-50%)',
+              fontSize: '10px',
+              letterSpacing: '0.14em',
+              opacity: '0.58',
+              textTransform: 'uppercase',
+            },
+          },
+          `${options.value} ${options.unit}`
+        ),
+      ]
+    )
   }
 
-  private formatTime(seconds: number): string {
-    const minutes = Math.floor(seconds / 60)
-    const remainingSeconds = seconds - minutes * 60
-    return `${minutes}:${remainingSeconds.toFixed(2).padStart(5, '0')}`
+  private renderGaugeSvg(options: GaugeOptions) {
+    return h(
+      'svg',
+      {
+        viewBox: '0 0 160 160',
+        style: {
+          position: 'absolute',
+          inset: '0',
+          width: '100%',
+          height: '100%',
+        },
+      },
+      [
+        h('circle', {
+          cx: '80',
+          cy: '80',
+          r: '58',
+          fill: 'none',
+          stroke: 'rgba(255,255,255,0.1)',
+          'stroke-width': '12',
+          'stroke-linecap': 'round',
+          'stroke-dasharray': '276 365',
+          transform: 'rotate(132 80 80)',
+        }),
+        h('circle', {
+          cx: '80',
+          cy: '80',
+          r: '58',
+          fill: 'none',
+          stroke: options.color,
+          'stroke-width': '12',
+          'stroke-linecap': 'round',
+          'stroke-dasharray': '276 365',
+          'stroke-dashoffset': options.dashOffset,
+          transform: 'rotate(132 80 80)',
+          style: {
+            filter: `drop-shadow(0 0 5px ${options.color})`,
+            transition: 'stroke-dashoffset 90ms linear',
+          },
+        }),
+        h('circle', {
+          cx: '80',
+          cy: '80',
+          r: '43',
+          fill: 'rgba(0,0,0,0.2)',
+          stroke: 'rgba(255,255,255,0.1)',
+        }),
+      ]
+    )
+  }
+
+  private centerValueStyle(size: number) {
+    return {
+      fontSize: `${size}px`,
+      fontWeight: '900',
+      lineHeight: '0.92',
+    }
+  }
+
+  private centerUnitStyle() {
+    return {
+      fontSize: '11px',
+      letterSpacing: '0.12em',
+      opacity: '0.72',
+    }
   }
 }

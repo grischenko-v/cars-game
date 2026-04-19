@@ -14,6 +14,7 @@ import { PositionLabelView } from './application/ui/PositionLabelView'
 import { StandingsView } from './application/ui/StandingsView'
 import { CarShadow } from './infrastructure/effects/CarShadow'
 import { SkidTrailRenderer } from './infrastructure/effects/SkidTrailRenderer'
+import { SpeedLinesOverlay } from './infrastructure/effects/SpeedLinesOverlay'
 import { CarView } from './infrastructure/graphics/CarView'
 import { publicAssetUrl } from './infrastructure/graphics/TextureFactory'
 import { GameRenderer } from './infrastructure/rendering/GameRenderer'
@@ -46,6 +47,7 @@ const minimap = new MinimapView(road)
 const cameraRig = new FollowCameraController(camera, renderer.domElement)
 const skidTrail = new SkidTrailRenderer(scene)
 const carShadow = new CarShadow(scene)
+const speedLines = new SpeedLinesOverlay()
 
 let carView: CarView | null = null
 let carLocalMinY = 0
@@ -57,7 +59,7 @@ let carRideHeightOffset = 0.14
 const OPPONENT_RIDE_HEIGHT_EXTRA = 0.34
 
 const carAggregate = new CarAggregate()
-hud.updateRace(0, TARGET_LAPS, 0, 0, [], false)
+standingsView.updateRace(0, TARGET_LAPS, 0, 0, [], false)
 
 const MAX_FORWARD_SPEED = 38
 const MAX_REVERSE_SPEED = 8
@@ -132,8 +134,10 @@ const tmpForwardProjected = new THREE.Vector3()
 const tmpMatrix = new THREE.Matrix4()
 const tmpQuat = new THREE.Quaternion()
 const tmpQuatB = new THREE.Quaternion()
+const tmpQuatC = new THREE.Quaternion()
 const tmpBox = new THREE.Box3()
 const tmpRollAxis = new THREE.Vector3(0, 0, 1)
+const tmpPitchAxis = new THREE.Vector3(1, 0, 0)
 const surfaceCache = new Map<string, RoadSurfaceData>()
 const competitors: Competitor[] = []
 const usedNames = new Set<string>()
@@ -434,9 +438,10 @@ function applyDrivePhysics(
   const absSpeed = car.absSpeed
   const speedRatio = clamp(absSpeed, 0, controls.maxForwardSpeed) / controls.maxForwardSpeed
   const accelCurve = 1 - Math.pow(speedRatio, 1.8)
+  car.updateTransmission(delta, controls.maxForwardSpeed, controls.canDrive ? controls.throttle : 0)
 
   if (controls.canDrive && controls.throttle > 0) {
-    car.accelerate(BASE_ACCEL * controls.throttle * accelCurve * delta)
+    car.accelerate(BASE_ACCEL * controls.throttle * accelCurve * car.shiftAccelerationFactor * delta)
   }
 
   if (controls.canDrive && controls.throttle < 0) {
@@ -552,6 +557,8 @@ function applyDrivePhysics(
     clamp(-car.steer * rollStrength * BODY_ROLL_AMOUNT, -BODY_ROLL_AMOUNT, BODY_ROLL_AMOUNT) *
     (surface.onRoad ? 1 : 0.6)
   car.rollToward(bodyRollTarget, expLerpFactor(5.5, delta))
+  tmpQuatC.setFromAxisAngle(tmpPitchAxis, -car.shiftKickAmount * 0.055)
+  tmpQuat.multiply(tmpQuatC)
   tmpQuatB.setFromAxisAngle(tmpRollAxis, car.bodyRoll)
   tmpQuat.multiply(tmpQuatB)
   view.slerpQuaternion(tmpQuat, expLerpFactor(TILT_SMOOTHNESS, delta))
@@ -572,9 +579,11 @@ function updateDrive(delta: number): void {
   const accelCurve = 1 - Math.pow(speedRatio, 1.8)
   const reverseRatio = clamp(Math.abs(Math.min(carAggregate.speed, 0)) / MAX_REVERSE_SPEED, 0, 1)
   const reverseCurve = 1 - Math.pow(reverseRatio, 1.35)
+  const throttleInput = canDrive && keys.forward ? 1 : canDrive && keys.backward ? -1 : 0
+  carAggregate.updateTransmission(delta, MAX_FORWARD_SPEED, throttleInput)
 
   if (canDrive && keys.forward) {
-    carAggregate.accelerate(BASE_ACCEL * accelCurve * delta)
+    carAggregate.accelerate(BASE_ACCEL * accelCurve * carAggregate.shiftAccelerationFactor * delta)
   }
 
   if (canDrive && keys.backward) {
@@ -702,6 +711,8 @@ function updateDrive(delta: number): void {
     clamp(-carAggregate.steer * rollStrength * BODY_ROLL_AMOUNT, -BODY_ROLL_AMOUNT, BODY_ROLL_AMOUNT) *
     (surface.onRoad ? 1 : 0.6)
   carAggregate.rollToward(bodyRollTarget, expLerpFactor(5.5, delta))
+  tmpQuatC.setFromAxisAngle(tmpPitchAxis, -carAggregate.shiftKickAmount * 0.055)
+  tmpQuat.multiply(tmpQuatC)
   tmpQuatB.setFromAxisAngle(tmpRollAxis, carAggregate.bodyRoll)
   tmpQuat.multiply(tmpQuatB)
   carView.slerpQuaternion(tmpQuat, expLerpFactor(TILT_SMOOTHNESS, delta))
@@ -724,7 +735,7 @@ function updateDrive(delta: number): void {
   if (updatedRaceSnapshot.finished) {
     gamePhase = 'finished'
   }
-  hud.updateRace(
+  standingsView.updateRace(
     updatedRaceSnapshot.completedLaps,
     updatedRaceSnapshot.targetLaps,
     updatedRaceSnapshot.elapsedTime,
@@ -736,7 +747,7 @@ function updateDrive(delta: number): void {
   const kmh = Math.round(
     Math.abs(carAggregate.signedSpeedAlongForward(tmpVecA)) * HUD_SPEED_MULTIPLIER
   )
-  hud.updateSpeed(kmh)
+  hud.updateInstruments(kmh, carAggregate.rpm, carAggregate.gear)
 }
 
 function updateOpponents(delta: number): void {
@@ -877,6 +888,7 @@ function animate(): void {
   updateCompetitionUi()
   skidTrail.update(carView, carAggregate, keys, road, terrain)
   cameraRig.update(carView, carAggregate.heading, carAggregate.speed, delta)
+  speedLines.update(carAggregate.speed, delta)
   minimap.draw(getMinimapMarkers())
 
   gameRenderer.render()

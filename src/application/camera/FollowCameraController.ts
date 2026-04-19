@@ -4,6 +4,8 @@ import { clamp, expLerpFactor, lerpAngle } from '../../utils/math'
 import type { CarView } from '../../infrastructure/graphics/CarView'
 
 const CAMERA_TARGET_HEIGHT = 0.9
+const BASE_FOV = 60
+const MAX_SPEED_REFERENCE = 38
 
 export class FollowCameraController {
   readonly controls: OrbitControls
@@ -18,6 +20,8 @@ export class FollowCameraController {
   private readonly tmpToCamera = new THREE.Vector3()
   private readonly tmpDesired = new THREE.Vector3()
   private readonly tmpSpherical = new THREE.Spherical()
+  private readonly previousShakeOffset = new THREE.Vector3()
+  private speedEffectTime = 0
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -53,6 +57,9 @@ export class FollowCameraController {
   update(car: CarView | null, heading: number, speed: number, delta: number): void {
     if (!car) return
 
+    this.camera.position.sub(this.previousShakeOffset)
+    this.previousShakeOffset.set(0, 0, 0)
+
     const carPosition = car.copyPosition(this.tmpCarPosition)
     this.tmpDesired.set(carPosition.x, carPosition.y + CAMERA_TARGET_HEIGHT, carPosition.z)
     this.controls.target.lerp(this.tmpDesired, expLerpFactor(8, delta))
@@ -67,6 +74,7 @@ export class FollowCameraController {
     }
 
     this.controls.update()
+    this.updateSpeedFeel(speed, delta)
   }
 
   dispose(): void {
@@ -116,6 +124,29 @@ export class FollowCameraController {
   private getForwardFromHeading(heading: number, out: THREE.Vector3): THREE.Vector3 {
     out.set(Math.sin(heading), 0, Math.cos(heading))
     return out.normalize()
+  }
+
+  private updateSpeedFeel(speed: number, delta: number): void {
+    const speedRatio = clamp(Math.abs(speed) / MAX_SPEED_REFERENCE, 0, 1)
+    const effect = THREE.MathUtils.smoothstep(speedRatio, 0.34, 1)
+    const targetFov = BASE_FOV + effect * 15
+    const nextFov = THREE.MathUtils.lerp(this.camera.fov, targetFov, expLerpFactor(3.6, delta))
+
+    if (Math.abs(nextFov - this.camera.fov) > 0.01) {
+      this.camera.fov = nextFov
+      this.camera.updateProjectionMatrix()
+    }
+
+    if (effect <= 0.01) return
+
+    this.speedEffectTime += delta * (12 + effect * 24)
+    const shakeAmount = effect * 0.045
+    this.previousShakeOffset.set(
+      Math.sin(this.speedEffectTime * 1.73) * shakeAmount,
+      Math.sin(this.speedEffectTime * 2.31 + 1.7) * shakeAmount * 0.52,
+      0
+    )
+    this.camera.position.add(this.previousShakeOffset)
   }
 
   private readonly handleUserOrbit = (): void => {
