@@ -114,14 +114,14 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
   }
 
   private buildRandomTrackCandidate(): THREE.Vector3[] {
-    const controlCount = this.randomInt(15, 24)
-    const stretchX = this.randomRange(1.08, 1.38)
-    const stretchZ = this.randomRange(0.82, 1.12)
-    const baseRadius = this.randomRange(72, 96)
-    const wobbleFrequencyA = this.randomInt(3, 6)
-    const wobbleFrequencyB = this.randomInt(4, 9)
-    const wobbleAmpA = this.randomRange(16, 28)
-    const wobbleAmpB = this.randomRange(8, 18)
+    const controlCount = this.randomInt(24, 34)
+    const stretchX = this.randomRange(1.12, 1.46)
+    const stretchZ = this.randomRange(0.86, 1.18)
+    const baseRadius = this.randomRange(205, 255)
+    const wobbleFrequencyA = this.randomInt(4, 7)
+    const wobbleFrequencyB = this.randomInt(5, 10)
+    const wobbleAmpA = this.randomRange(34, 58)
+    const wobbleAmpB = this.randomRange(18, 36)
     const wobblePhaseA = this.randomRange(0, Math.PI * 2)
     const wobblePhaseB = this.randomRange(0, Math.PI * 2)
     const controls: THREE.Vector3[] = []
@@ -134,7 +134,7 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
         baseRadius +
         Math.sin(sampleAngle * wobbleFrequencyA + wobblePhaseA) * wobbleAmpA +
         Math.sin(sampleAngle * wobbleFrequencyB + wobblePhaseB) * wobbleAmpB +
-        this.randomRange(-4, 4)
+        this.randomRange(-10, 10)
 
       controls.push(
         new THREE.Vector3(
@@ -146,7 +146,7 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
     }
 
     const curve = new THREE.CatmullRomCurve3(controls, true, 'catmullrom', 0.42)
-    const points = curve.getSpacedPoints(239)
+    const points = curve.getSpacedPoints(539)
     points.pop()
 
     const centroid = points

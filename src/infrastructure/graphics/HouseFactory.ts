@@ -1,19 +1,26 @@
 import * as THREE from 'three'
+import { loadRepeatingPbrTextures } from './TextureFactory'
 
 export class HouseFactory {
+  private readonly wallMaterials = this.createWallMaterials()
+  private readonly roofMaterials = this.createRoofMaterials()
+  private readonly doorMaterial = this.createDoorMaterial()
+
   create(scale = 1, rotationY = 0): THREE.Group {
     const house = new THREE.Group()
     house.rotation.y = rotationY
     house.scale.setScalar(scale)
 
-    const wallColors = [0xd7cab2, 0xc8d8c1, 0xe3d5c4]
-    const roofColors = [0x8b4a36, 0x6d4f3f, 0x7d5a4b]
-    const wallColor = wallColors[THREE.MathUtils.randInt(0, wallColors.length - 1)]
-    const roofColor = roofColors[THREE.MathUtils.randInt(0, roofColors.length - 1)]
+    const wallMaterial = this.wallMaterials[
+      THREE.MathUtils.randInt(0, this.wallMaterials.length - 1)
+    ]
+    const roofMaterial = this.roofMaterials[
+      THREE.MathUtils.randInt(0, this.roofMaterials.length - 1)
+    ]
 
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(4.6, 2.8, 3.8),
-      new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.95 })
+      wallMaterial
     )
     body.position.y = 1.4
     body.castShadow = true
@@ -21,7 +28,7 @@ export class HouseFactory {
 
     const roof = new THREE.Mesh(
       new THREE.CylinderGeometry(0, 3.6, 2.2, 4),
-      new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.92 })
+      roofMaterial
     )
     roof.position.y = 3.35
     roof.rotation.y = Math.PI * 0.25
@@ -30,7 +37,7 @@ export class HouseFactory {
 
     const door = new THREE.Mesh(
       new THREE.BoxGeometry(0.8, 1.5, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0x6b4833, roughness: 1 })
+      this.doorMaterial
     )
     door.position.set(0, 0.75, 1.96)
 
@@ -57,5 +64,55 @@ export class HouseFactory {
     }
 
     return house
+  }
+
+  private createWallMaterials(): THREE.MeshStandardMaterial[] {
+    const textures = loadRepeatingPbrTextures('/textures/walls', 'Bricks084_1K-JPG', 2.2, 1.4)
+    const colors = [0xd9c9ae, 0xd4d7c5, 0xe2d0bb]
+
+    return colors.map((color) =>
+      new THREE.MeshStandardMaterial({
+        color,
+        map: textures.map,
+        normalMap: textures.normalMap,
+        roughnessMap: textures.roughnessMap,
+        roughness: 0.95,
+        normalScale: new THREE.Vector2(0.25, 0.25),
+      })
+    )
+  }
+
+  private createRoofMaterials(): THREE.MeshStandardMaterial[] {
+    const textures = loadRepeatingPbrTextures(
+      '/textures/roof',
+      'RoofingTiles011A_1K-JPG',
+      1.8,
+      1.8
+    )
+    const colors = [0x9b4f39, 0x74513f, 0x855f49]
+
+    return colors.map((color) =>
+      new THREE.MeshStandardMaterial({
+        color,
+        map: textures.map,
+        normalMap: textures.normalMap,
+        roughnessMap: textures.roughnessMap,
+        roughness: 0.92,
+        normalScale: new THREE.Vector2(0.36, 0.36),
+      })
+    )
+  }
+
+  private createDoorMaterial(): THREE.MeshStandardMaterial {
+    const textures = loadRepeatingPbrTextures('/textures/bark', 'Bark012_1K-JPG', 1, 1.8)
+
+    return new THREE.MeshStandardMaterial({
+      color: 0x76543b,
+      map: textures.map,
+      normalMap: textures.normalMap,
+      roughnessMap: textures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.3, 0.3),
+    })
   }
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { qualitySettings } from '../application/config/QualitySettings'
 import { SpatialHashGrid } from '../domain/shared/SpatialHashGrid'
+import { loadRepeatingPbrTextures } from '../infrastructure/graphics/TextureFactory'
 import type { Terrain } from './Terrain'
 import type { Road } from './Road'
 
@@ -194,10 +195,45 @@ export class Decorations {
   }
 
   private buildTreeMeshes(): void {
-    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x6d4b2f, roughness: 1 })
-    const roundCrownMaterial = new THREE.MeshStandardMaterial({ color: 0x7ea45e, roughness: 1 })
-    const pineCrownMaterial = new THREE.MeshStandardMaterial({ color: 0x517044, roughness: 1 })
-    const clusterCrownMaterial = new THREE.MeshStandardMaterial({ color: 0x86a765, roughness: 1 })
+    const barkTextures = loadRepeatingPbrTextures('/textures/bark', 'Bark012_1K-JPG', 1.3, 3.4)
+    const foliageTextures = loadRepeatingPbrTextures(
+      '/textures/foliage',
+      'PineNeedles001_1K-JPG',
+      2.4,
+      2.4
+    )
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8b6a48,
+      map: barkTextures.map,
+      normalMap: barkTextures.normalMap,
+      roughnessMap: barkTextures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.42, 0.42),
+    })
+    const roundCrownMaterial = new THREE.MeshStandardMaterial({
+      color: 0x7ea45e,
+      map: foliageTextures.map,
+      normalMap: foliageTextures.normalMap,
+      roughnessMap: foliageTextures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.3, 0.3),
+    })
+    const pineCrownMaterial = new THREE.MeshStandardMaterial({
+      color: 0x517044,
+      map: foliageTextures.map,
+      normalMap: foliageTextures.normalMap,
+      roughnessMap: foliageTextures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.32, 0.32),
+    })
+    const clusterCrownMaterial = new THREE.MeshStandardMaterial({
+      color: 0x86a765,
+      map: foliageTextures.map,
+      normalMap: foliageTextures.normalMap,
+      roughnessMap: foliageTextures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+    })
 
     const roundTrees = this.treeInstances.filter((tree) => tree.variant === 0)
     const pineTrees = this.treeInstances.filter((tree) => tree.variant === 1)
@@ -258,9 +294,38 @@ export class Decorations {
   }
 
   private buildHouseMeshes(): void {
-    const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xd7cab2, roughness: 0.95 })
-    const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x8b4a36, roughness: 0.92 })
-    const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x6b4833, roughness: 1 })
+    const wallTextures = loadRepeatingPbrTextures('/textures/walls', 'Bricks084_1K-JPG', 2.2, 1.4)
+    const roofTextures = loadRepeatingPbrTextures(
+      '/textures/roof',
+      'RoofingTiles011A_1K-JPG',
+      1.8,
+      1.8
+    )
+    const barkTextures = loadRepeatingPbrTextures('/textures/bark', 'Bark012_1K-JPG', 1, 1.8)
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd9c9ae,
+      map: wallTextures.map,
+      normalMap: wallTextures.normalMap,
+      roughnessMap: wallTextures.roughnessMap,
+      roughness: 0.95,
+      normalScale: new THREE.Vector2(0.25, 0.25),
+    })
+    const roofMaterial = new THREE.MeshStandardMaterial({
+      color: 0x9b4f39,
+      map: roofTextures.map,
+      normalMap: roofTextures.normalMap,
+      roughnessMap: roofTextures.roughnessMap,
+      roughness: 0.92,
+      normalScale: new THREE.Vector2(0.36, 0.36),
+    })
+    const doorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x76543b,
+      map: barkTextures.map,
+      normalMap: barkTextures.normalMap,
+      roughnessMap: barkTextures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.3, 0.3),
+    })
     const windowMaterial = new THREE.MeshStandardMaterial({
       color: 0xb7d8ee,
       roughness: 0.2,

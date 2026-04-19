@@ -1,6 +1,10 @@
 import * as THREE from 'three'
+import { loadRepeatingPbrTextures } from './TextureFactory'
 
 export class VegetationFactory {
+  private readonly barkMaterial = this.createBarkMaterial()
+  private readonly foliageMaterial = this.createFoliageMaterial()
+
   constructor(private readonly randomRange: (min: number, max: number) => number) {}
 
   createRoundTree(scale: number): THREE.Group {
@@ -9,7 +13,7 @@ export class VegetationFactory {
 
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.25, 0.35, 2.2, 8),
-      new THREE.MeshStandardMaterial({ color: 0x6d4b2f, roughness: 1 })
+      this.barkMaterial
     )
     trunk.position.y = 1.1
     trunk.castShadow = true
@@ -17,14 +21,7 @@ export class VegetationFactory {
 
     const crown = new THREE.Mesh(
       new THREE.SphereGeometry(1.4, 10, 10),
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(
-          this.randomRange(0.24, 0.31),
-          0.3,
-          this.randomRange(0.4, 0.5)
-        ),
-        roughness: 1,
-      })
+      this.createFoliageVariant()
     )
     crown.position.y = 2.7
     crown.castShadow = true
@@ -41,7 +38,7 @@ export class VegetationFactory {
 
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.18, 0.28, 2.6, 8),
-      new THREE.MeshStandardMaterial({ color: 0x6c4b32, roughness: 1 })
+      this.barkMaterial
     )
     trunk.position.y = 1.3
     trunk.castShadow = true
@@ -51,14 +48,7 @@ export class VegetationFactory {
     for (let i = 0; i < 3; i++) {
       const crown = new THREE.Mesh(
         new THREE.ConeGeometry(1.35 - i * 0.2, 1.8, 8),
-        new THREE.MeshStandardMaterial({
-          color: new THREE.Color().setHSL(
-            this.randomRange(0.27, 0.34),
-            0.35,
-            this.randomRange(0.3, 0.42)
-          ),
-          roughness: 1,
-        })
+        this.createFoliageVariant(0.82)
       )
       crown.position.y = 2 + i * 0.75
       crown.castShadow = true
@@ -76,7 +66,7 @@ export class VegetationFactory {
 
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22, 0.32, 2.4, 8),
-      new THREE.MeshStandardMaterial({ color: 0x715236, roughness: 1 })
+      this.barkMaterial
     )
     trunk.position.y = 1.2
     trunk.castShadow = true
@@ -92,14 +82,7 @@ export class VegetationFactory {
     for (const [ox, oy, oz] of offsets) {
       const crown = new THREE.Mesh(
         new THREE.SphereGeometry(this.randomRange(0.95, 1.2), 9, 9),
-        new THREE.MeshStandardMaterial({
-          color: new THREE.Color().setHSL(
-            this.randomRange(0.23, 0.3),
-            0.28,
-            this.randomRange(0.38, 0.5)
-          ),
-          roughness: 1,
-        })
+        this.createFoliageVariant()
       )
       crown.position.set(ox, oy, oz)
       crown.castShadow = true
@@ -109,5 +92,46 @@ export class VegetationFactory {
 
     tree.rotation.y = this.randomRange(0, Math.PI * 2)
     return tree
+  }
+
+  private createBarkMaterial(): THREE.MeshStandardMaterial {
+    const textures = loadRepeatingPbrTextures('/textures/bark', 'Bark012_1K-JPG', 1.4, 3.2)
+
+    return new THREE.MeshStandardMaterial({
+      color: 0x8b6a48,
+      map: textures.map,
+      normalMap: textures.normalMap,
+      roughnessMap: textures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.42, 0.42),
+    })
+  }
+
+  private createFoliageMaterial(): THREE.MeshStandardMaterial {
+    const textures = loadRepeatingPbrTextures(
+      '/textures/foliage',
+      'PineNeedles001_1K-JPG',
+      2.4,
+      2.4
+    )
+
+    return new THREE.MeshStandardMaterial({
+      color: 0x7ea45f,
+      map: textures.map,
+      normalMap: textures.normalMap,
+      roughnessMap: textures.roughnessMap,
+      roughness: 1,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+    })
+  }
+
+  private createFoliageVariant(lightnessMultiplier = 1): THREE.MeshStandardMaterial {
+    const material = this.foliageMaterial.clone()
+    material.color = new THREE.Color().setHSL(
+      this.randomRange(0.24, 0.34),
+      0.34,
+      this.randomRange(0.32, 0.46) * lightnessMultiplier
+    )
+    return material
   }
 }

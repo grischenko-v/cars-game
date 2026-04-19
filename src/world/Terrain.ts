@@ -6,7 +6,7 @@ import type { Road } from './Road'
 
 export class Terrain {
   road: Road
-  size = 520
+  size = 1500
   segments = qualitySettings.terrainSegments
   geometry: THREE.PlaneGeometry
   material: THREE.MeshStandardMaterial
@@ -34,8 +34,8 @@ export class Terrain {
     const grassTextures = loadRepeatingPbrTextures(
       '/textures/grass',
       'Grass001_1K-JPG',
-      46,
-      46
+      118,
+      118
     )
 
     this.material = new THREE.MeshStandardMaterial({
