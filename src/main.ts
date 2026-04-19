@@ -15,6 +15,7 @@ import { StandingsView } from './application/ui/StandingsView'
 import { CarShadow } from './infrastructure/effects/CarShadow'
 import { SkidTrailRenderer } from './infrastructure/effects/SkidTrailRenderer'
 import { CarView } from './infrastructure/graphics/CarView'
+import { publicAssetUrl } from './infrastructure/graphics/TextureFactory'
 import { GameRenderer } from './infrastructure/rendering/GameRenderer'
 import { LightingFactory } from './infrastructure/rendering/LightingFactory'
 import { NameGenerator } from './domain/race/NameGenerator'
@@ -146,7 +147,7 @@ let goHoldTime = 0
 loadingView.showLoading(null)
 
 loader.load(
-  '/models/car.glb',
+  publicAssetUrl('/models/car.glb'),
   (gltf) => {
     carView = new CarView(gltf.scene)
     carView.addTo(scene)

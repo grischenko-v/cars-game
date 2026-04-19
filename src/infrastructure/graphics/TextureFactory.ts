@@ -23,8 +23,15 @@ export function loadRepeatingPbrTextures(
   return { map, normalMap, roughnessMap }
 }
 
+export function publicAssetUrl(path: string): string {
+  const base = import.meta.env.BASE_URL.endsWith('/')
+    ? import.meta.env.BASE_URL
+    : `${import.meta.env.BASE_URL}/`
+  return `${base}${path.replace(/^\/+/, '')}`
+}
+
 function loadTexture(path: string, repeatX: number, repeatY: number): THREE.Texture {
-  const texture = textureLoader.load(path)
+  const texture = textureLoader.load(publicAssetUrl(path))
   texture.wrapS = THREE.RepeatWrapping
   texture.wrapT = THREE.RepeatWrapping
   texture.repeat.set(repeatX, repeatY)
