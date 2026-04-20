@@ -13,22 +13,23 @@ GitHub Pages: https://grischenko-v.github.io/cars-game/
 - Three.js
 - GLTFLoader for `.glb` car model loading
 - OrbitControls for camera interaction
-- Vue runtime DOM for reactive HUD widgets
+- Vue 3 SFC components for HUD, standings, minimap, loading, and labels
 - Canvas 2D overlay for speed-focus effects
 - GitHub Actions
 - GitHub Pages
 
 ## Features
 
-- Generated long closed racing track with longer straights, smoother corners, variable `1..6` lane sections, matching lane markings, smooth asphalt width transitions, and special turn sections: hairpins, chicanes, double-apex corners, banked corners, and S-curves
+- Generated long closed racing track with longer straights, smoother corners, variable `1..6` lane sections, matching dashed lane markings, continuous white edge lines, smooth asphalt width transitions, and special turn sections: hairpins, chicanes, double-apex corners, banked corners, and S-curves
 - Player car physics with steering, drifting, braking, traction loss, seven-speed gear shifting, and surface-dependent speed limits
+- Randomized Ford Mustang and Mini JCW car models with real-width scaling, model-specific acceleration, top speed, handling, and grip
 - Six AI opponents with rail-like racing-line logic, calculated late braking points, speed limits from 95% to 80% of player speed, lightweight anti-overlap separation, and collision physics
 - F1-style staggered seven-slot start grid on a stable 2-lane section with a checkered start/finish line; the player starts from the last row
 - Lap counter, stopwatch, lap times, and restart after finish
 - Minimap with all cars
 - Analog speedometer and tachometer
 - Brake/skid trails, speed-focus feedback, and finish statistics
-- Opaque textured asphalt with worn patches/cracks, edge-adjacent grass/sand terrain, continuous non-passable guardrails on wide sections, road signs, trees, houses, rocks, sand, and dirt patches
+- Opaque textured asphalt with route-based tone variation, layered asphalt patch textures, repair patches, worn cracks, edge-adjacent grass/sand terrain, continuous non-passable guardrails on wide sections, road signs, trees, houses, rocks, sand, and dirt patches
 - Dynamic camera FOV and peripheral focus/blur overlay for stronger speed perception
 
 ## Local Development
@@ -55,7 +56,7 @@ npm run typecheck
 
 ## Assets
 
-- Car model: `public/models/car.glb`
+- Car models: `public/models/mustang.glb` and `public/models/mini.glb`
 - Textures: `public/textures`
 - Initial model/assets were created or prepared with AI-assisted tooling.
 

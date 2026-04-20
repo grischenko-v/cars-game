@@ -68,6 +68,7 @@ export class Decorations {
   private readonly tmpPosition = new THREE.Vector3()
   private readonly tmpScale = new THREE.Vector3()
   private readonly yAxis = new THREE.Vector3(0, 1, 0)
+  private visibilityUpdateTimer = 0
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -162,7 +163,7 @@ export class Decorations {
   addGroundPatch(x: number, z: number, variant: number): void {
     this.groundPatchInstances.push({
       x,
-      y: this.terrain.height(x, z) + 0.055,
+      y: this.terrain.height(x, z) + 0.006,
       z,
       scaleX: this.randomRange(5, 15),
       scaleZ: this.randomRange(3, 9),
@@ -336,7 +337,12 @@ export class Decorations {
     for (let i = 0; i < count; i++) {
       const distance = (i / count) * this.road.totalLength
 
-      if (this.road.getEffectiveLaneCountAtDistance(distance) < 4) continue
+      if (
+        this.road.isLaneTransitionAtDistance(distance, 8) ||
+        this.road.getEffectiveLaneCountAtDistance(distance) < 4
+      ) {
+        continue
+      }
 
       this.road.sampleCenterlineByDistance(distance, center, tangent)
       sideNormal.set(-tangent.z, 0, tangent.x).normalize()
@@ -643,10 +649,10 @@ export class Decorations {
         color: 0xc8b985,
         roughness: 1,
         metalness: 0,
-        depthWrite: false,
+        depthWrite: true,
         polygonOffset: true,
-        polygonOffsetFactor: -3,
-        polygonOffsetUnits: -3,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
       }),
       sandPatches
     )
@@ -656,10 +662,10 @@ export class Decorations {
         color: 0x8f7c5e,
         roughness: 1,
         metalness: 0,
-        depthWrite: false,
+        depthWrite: true,
         polygonOffset: true,
-        polygonOffsetFactor: -3,
-        polygonOffsetUnits: -3,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
       }),
       dirtPatches
     )
@@ -763,7 +769,12 @@ export class Decorations {
     )
   }
 
-  updateVisibility(carPosition: THREE.Vector3): void {
+  updateVisibility(carPosition: THREE.Vector3, delta = 0): void {
+    this.visibilityUpdateTimer -= delta
+
+    if (this.visibilityUpdateTimer > 0) return
+
+    this.visibilityUpdateTimer = qualitySettings.visibilityUpdateInterval
     const maxDistanceSq = qualitySettings.decorationDrawDistance * qualitySettings.decorationDrawDistance
 
     this.group.children.forEach((child) => {

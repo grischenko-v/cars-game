@@ -27,6 +27,10 @@ export class Road {
     return this.track.roadWidth
   }
 
+  get nominalLaneWidth(): number {
+    return this.track.nominalLaneWidth
+  }
+
   get shoulderWidth(): number {
     return this.track.shoulderWidth
   }
@@ -153,6 +157,10 @@ export class Road {
 
   getEffectiveLaneCountAtDistance(distance: number): number {
     return this.track.getEffectiveLaneCountAtDistance(distance)
+  }
+
+  isLaneTransitionAtDistance(distance: number, margin = 0): boolean {
+    return this.track.isLaneTransitionAtDistance(distance, margin)
   }
 
   getTrackHalfWidthAtDistance(distance: number): number {

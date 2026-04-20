@@ -88,6 +88,10 @@ export class TrackModel {
   readonly trackBounds: TrackBounds
   private readonly up = new THREE.Vector3(0, 1, 0)
 
+  get nominalLaneWidth(): number {
+    return this.laneWidth
+  }
+
   constructor(snapshot: TrackLayoutSnapshot) {
     this.roadWidth = snapshot.roadWidth
     this.shoulderWidth = snapshot.shoulderWidth
@@ -302,6 +306,20 @@ export class TrackModel {
     return THREE.MathUtils.clamp(laneCountByWidth, 1, 6)
   }
 
+  isLaneTransitionAtDistance(distance: number, margin = 0): boolean {
+    const loopDistance = this.getLanePatternDistance(distance)
+    const localDistance = THREE.MathUtils.euclideanModulo(
+      loopDistance,
+      this.laneSectionLength
+    )
+    const transitionLength = this.laneTransitionLength + margin
+
+    return (
+      localDistance < transitionLength ||
+      localDistance > this.laneSectionLength - transitionLength
+    )
+  }
+
   getTrackHalfWidthAtDistance(distance: number): number {
     const loopDistance = this.getLanePatternDistance(distance)
     const localDistance = THREE.MathUtils.euclideanModulo(
@@ -370,6 +388,7 @@ export class TrackModel {
     terrainData: { height: number; normal: THREE.Vector3 }
   ): RoadSurfaceData {
     const roadBand = this.getBandData(x, z)
+    const sideSign = Math.sign(roadBand.lateralOffset || 1)
 
     if (roadBand.distFromRoadCenter <= roadBand.halfWidth) {
       const slope = this.getBankSlopeAtDistance(roadBand.distanceAlong)
@@ -385,14 +404,52 @@ export class TrackModel {
       }
     }
 
-    if (roadBand.distFromRoadCenter <= roadBand.halfWidth + this.shoulderBlend) {
-      const t = (roadBand.distFromRoadCenter - roadBand.halfWidth) / this.shoulderBlend
+    if (roadBand.distFromRoadCenter <= roadBand.halfWidth + this.shoulderWidth) {
+      const shoulderOffset = sideSign * THREE.MathUtils.clamp(
+        roadBand.distFromRoadCenter,
+        roadBand.halfWidth,
+        roadBand.halfWidth + this.shoulderWidth
+      )
+
+      return {
+        height: this.getBankedHeightAtDistance(
+          roadBand.distanceAlong,
+          shoulderOffset,
+          this.shoulderY
+        ),
+        normal: this.getBankedNormalAtDistance(roadBand.distanceAlong),
+        onRoad: false,
+      }
+    }
+
+    if (roadBand.distFromRoadCenter <= roadBand.halfWidth + this.shoulderWidth + this.apronWidth) {
+      const apronOffset = sideSign * THREE.MathUtils.clamp(
+        roadBand.distFromRoadCenter,
+        roadBand.halfWidth + this.shoulderWidth,
+        roadBand.halfWidth + this.shoulderWidth + this.apronWidth
+      )
+
+      return {
+        height: this.getBankedHeightAtDistance(
+          roadBand.distanceAlong,
+          apronOffset,
+          this.apronY
+        ),
+        normal: this.getBankedNormalAtDistance(roadBand.distanceAlong),
+        onRoad: false,
+      }
+    }
+
+    const blendStart = roadBand.halfWidth + this.shoulderWidth + this.apronWidth
+
+    if (roadBand.distFromRoadCenter <= blendStart + this.terrainBlend) {
+      const t = (roadBand.distFromRoadCenter - blendStart) / this.terrainBlend
       const k = THREE.MathUtils.smoothstep(t, 0, 1)
-      const edgeOffset = Math.sign(roadBand.lateralOffset || 1) * roadBand.halfWidth
+      const edgeOffset = sideSign * blendStart
       const edgeHeight = this.getBankedHeightAtDistance(
         roadBand.distanceAlong,
         edgeOffset,
-        this.roadY
+        this.apronY
       )
       const edgeNormal = this.getBankedNormalAtDistance(roadBand.distanceAlong)
 

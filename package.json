@@ -12,11 +12,12 @@
   "author": "Vladimir Grishenko",
   "license": "ISC",
   "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.3",
     "typescript": "^5.9.3",
     "vite": "^8.0.8"
   },
   "dependencies": {
-    "@vue/runtime-dom": "^3.5.32",
+    "vue": "^3.5.32",
     "three": "^0.184.0"
   }
 }

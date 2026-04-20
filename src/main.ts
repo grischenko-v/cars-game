@@ -1,12 +1,18 @@
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clamp, expLerpFactor } from './utils/math'
+import { qualitySettings } from './application/config/QualitySettings'
 import { Car as CarAggregate } from './domain/car/Car'
 import { Race } from './domain/race/Race'
 import type { RoadBandData, RoadSurfaceData } from './domain/road/TrackModel'
+import type { VehicleSpec } from './domain/vehicle/VehicleSpec'
+import { vehicleSpecs } from './domain/vehicle/VehicleSpec'
 import { KeyboardInput } from './application/input/KeyboardInput'
 import { FollowCameraController } from './application/camera/FollowCameraController'
 import { OpponentDriver } from './application/ai/OpponentDriver'
+import type { GamePhase } from './application/game/GamePhase'
+import type { DriveControls } from './application/physics/DriveControls'
+import type { Competitor } from './application/race/Competitor'
+import { createDefaultOpponentProfiles } from './application/race/OpponentProfile'
 import { HudView } from './application/ui/HudView'
 import { LoadingView } from './application/ui/LoadingView'
 import { MinimapView } from './application/ui/MinimapView'
@@ -18,7 +24,9 @@ import { CarShadow } from './infrastructure/effects/CarShadow'
 import { SkidTrailRenderer } from './infrastructure/effects/SkidTrailRenderer'
 import { SpeedLinesOverlay } from './infrastructure/effects/SpeedLinesOverlay'
 import { CarView } from './infrastructure/graphics/CarView'
-import { publicAssetUrl } from './infrastructure/graphics/TextureFactory'
+import type { CarTemplate } from './infrastructure/graphics/CarTemplateFactory'
+import { CarTemplateFactory } from './infrastructure/graphics/CarTemplateFactory'
+import { vehicleAssetCatalog } from './infrastructure/graphics/VehicleAssetCatalog'
 import { GameRenderer } from './infrastructure/rendering/GameRenderer'
 import { LightingFactory } from './infrastructure/rendering/LightingFactory'
 import { NameGenerator } from './domain/race/NameGenerator'
@@ -51,15 +59,12 @@ const cameraRig = new FollowCameraController(camera, renderer.domElement)
 const skidTrail = new SkidTrailRenderer(scene)
 const carShadow = new CarShadow(scene)
 const speedLines = new SpeedLinesOverlay()
+const carTemplateFactory = new CarTemplateFactory()
 
 let carView: CarView | null = null
-let carLocalMinY = 0
-let carLocalMaxX = 0
-let carLocalMinX = 0
-let carLocalMaxZ = 0
-let carLocalMinZ = 0
 let carRideHeightOffset = 0.14
-const OPPONENT_RIDE_HEIGHT_EXTRA = 0.34
+const OPPONENT_RIDE_HEIGHT_EXTRA = 0.04
+let playerVehicleSpec: VehicleSpec | null = null
 
 const carAggregate = new CarAggregate()
 standingsView.updateRace(0, TARGET_LAPS, 0, 0, [], false)
@@ -79,9 +84,9 @@ const GRIP_NORMAL = 8.8
 const GRIP_HANDBRAKE = 4.8
 const HEIGHT_SMOOTHNESS = 10
 const TILT_SMOOTHNESS = 8
-const CAR_COLLIDER_RADIUS = 1.05
-const COMPETITOR_COLLIDER_RADIUS = 1.55
 const CAR_GROUND_CLEARANCE = 0.05
+const OFFROAD_GROUND_CLEARANCE = 0.26
+const OFFROAD_RIDE_HEIGHT_BOOST = 0.24
 const LATERAL_GRIP_ROAD = 8.6
 const LATERAL_GRIP_OFFROAD = 3.6
 const YAW_RESPONSE_ROAD = 5.4
@@ -101,31 +106,8 @@ const COUNTDOWN_GO_HOLD_SECONDS = 0.65
 const PLAYER_START_GRID_OFFSET = -48.3
 const OPPONENT_START_GRID_OFFSET = -5.1
 const START_GRID_ROW_SPACING = 7.2
-const OPPONENT_LATERAL_OFFSET_FACTOR = 0.42
+const OPPONENT_LATERAL_OFFSET_FACTOR = 0.26
 const OPPONENT_RAIL_HALF_WIDTH_FACTOR = 0.64
-
-type GamePhase = 'loading' | 'countdown' | 'running' | 'finished'
-
-interface Competitor {
-  id: string
-  name: string
-  isPlayer: boolean
-  car: CarAggregate
-  view: CarView
-  race: Race
-  driver: OpponentDriver | null
-  minimapColor: string
-}
-
-interface DriveControls {
-  throttle: number
-  steer: number
-  brake: boolean
-  canDrive: boolean
-  maxForwardSpeed: number
-  accelerationFactor?: number
-  extraRideHeight: number
-}
 
 const clock = new THREE.Clock()
 
@@ -155,12 +137,17 @@ const STANDINGS_UPDATE_INTERVAL = 0.12
 const SURFACE_CACHE_SCALE = 4
 const SURFACE_CACHE_LIMIT = 12000
 let standingsUpdateTimer = 0
+let labelUpdateTimer = 0
+let minimapUpdateTimer = 0
 let hasRankedCompetition = false
 
-const loader = new GLTFLoader()
 let gamePhase: GamePhase = 'loading'
 let countdownTime = COUNTDOWN_SECONDS
 let goHoldTime = 0
+
+function randomItem<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)]
+}
 
 function registerCompetitor(competitor: Competitor): void {
   competitors.push(competitor)
@@ -175,47 +162,13 @@ function registerCompetitor(competitor: Competitor): void {
 
 loadingView.showLoading(null)
 
-loader.load(
-  publicAssetUrl('/models/car.glb'),
-  (gltf) => {
-    carView = new CarView(gltf.scene)
+carTemplateFactory.loadAll(vehicleAssetCatalog)
+  .then((carTemplates) => {
+    const playerTemplate = randomItem(carTemplates)
+    playerVehicleSpec = playerTemplate.spec
+    carView = carTemplateFactory.instantiate(playerTemplate)
     carView.addTo(scene)
     carView.enableShadows()
-
-    const box = carView.getLocalBounds()
-    if (!box) {
-      loadingView.showError('Модель машины загрузилась без геометрии')
-      return
-    }
-    const center = box.getCenter(new THREE.Vector3())
-    const size = box.getSize(new THREE.Vector3())
-
-    carView.translateBy(center.multiplyScalar(-1))
-    carView.translateY(size.y / 2)
-
-    const maxDim = Math.max(size.x, size.y, size.z)
-    const desiredLength = 4.8
-    const scale = desiredLength / maxDim
-    carView.setScalarScale(scale)
-
-    const boxAfterScale = carView.getLocalBounds()
-    if (!boxAfterScale) {
-      loadingView.showError('Не удалось подготовить геометрию машины')
-      return
-    }
-    const centerAfterScale = boxAfterScale.getCenter(new THREE.Vector3())
-    carView.translateBy(centerAfterScale.multiplyScalar(-1))
-
-    const localBox = carView.getLocalBounds()
-    if (!localBox) {
-      loadingView.showError('Не удалось определить размеры машины')
-      return
-    }
-    carLocalMinY = localBox.min.y
-    carLocalMinX = localBox.min.x
-    carLocalMaxX = localBox.max.x
-    carLocalMinZ = localBox.min.z
-    carLocalMaxZ = localBox.max.z
 
     placeCarOnStartGrid(
       carView,
@@ -232,7 +185,7 @@ loader.load(
     positionLabelTargets.length = 0
     hasRankedCompetition = false
     standingsUpdateTimer = 0
-    createOpponents(carView)
+    createOpponents(carTemplates)
     registerCompetitor({
       id: 'player',
       name: playerName,
@@ -242,23 +195,16 @@ loader.load(
       race,
       driver: null,
       minimapColor: '#ff7b54',
+      vehicleSpec: playerTemplate.spec,
     })
 
     cameraRig.focusOn(carView, carAggregate.heading)
     startCountdown()
-  },
-  (event) => {
-    const progress =
-      event.lengthComputable && event.total > 0
-        ? clamp(event.loaded / event.total, 0, 1)
-        : null
-    loadingView.showLoading(progress)
-  },
-  (error) => {
+  })
+  .catch((error) => {
     console.error('Ошибка загрузки модели:', error)
-    loadingView.showError('Не удалось загрузить модель машины')
-  }
-)
+    loadingView.showError('Не удалось загрузить модели машин')
+  })
 
 function startCountdown(): void {
   gamePhase = 'countdown'
@@ -292,78 +238,17 @@ function updateCountdown(delta: number): void {
   gamePhase = 'running'
 }
 
-function createOpponents(sourceView: CarView): void {
-  const opponentSettings = [
-    {
-      id: 'opponent-1',
-      speedFactor: 0.95,
-      accelerationFactor: 0.98,
-      aggression: 0.94,
-      lineBias: -0.45,
-      distanceOffset: OPPONENT_START_GRID_OFFSET,
-      lateralOffset: -road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
-      tint: 0xb9413f,
-      minimapColor: '#e05249',
-    },
-    {
-      id: 'opponent-2',
-      speedFactor: 0.92,
-      accelerationFactor: 0.96,
-      aggression: 0.88,
-      lineBias: 0.4,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING,
-      lateralOffset: road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
-      tint: 0x2f78c4,
-      minimapColor: '#4e9dff',
-    },
-    {
-      id: 'opponent-3',
-      speedFactor: 0.89,
-      accelerationFactor: 0.94,
-      aggression: 0.82,
-      lineBias: -0.1,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 2,
-      lateralOffset: -road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
-      tint: 0xe5b84a,
-      minimapColor: '#f3d45a',
-    },
-    {
-      id: 'opponent-4',
-      speedFactor: 0.86,
-      accelerationFactor: 0.92,
-      aggression: 0.76,
-      lineBias: 0.55,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 3,
-      lateralOffset: road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
-      tint: 0x5fbf78,
-      minimapColor: '#7bd88f',
-    },
-    {
-      id: 'opponent-5',
-      speedFactor: 0.83,
-      accelerationFactor: 0.9,
-      aggression: 0.8,
-      lineBias: -0.55,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 4,
-      lateralOffset: -road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
-      tint: 0xb66ce0,
-      minimapColor: '#c58cff',
-    },
-    {
-      id: 'opponent-6',
-      speedFactor: 0.8,
-      accelerationFactor: 0.88,
-      aggression: 0.72,
-      lineBias: 0.08,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 5,
-      lateralOffset: road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
-      tint: 0xf08a52,
-      minimapColor: '#ff9f6e',
-    },
-  ]
+function createOpponents(carTemplates: CarTemplate[]): void {
+  const opponentSettings = createDefaultOpponentProfiles({
+    trackHalfWidth: road.getTrackHalfWidthAtDistance(0),
+    startOffset: OPPONENT_START_GRID_OFFSET,
+    rowSpacing: START_GRID_ROW_SPACING,
+    lateralOffsetFactor: OPPONENT_LATERAL_OFFSET_FACTOR,
+  })
 
   for (const settings of opponentSettings) {
-    const opponentView = sourceView.clone()
+    const template = randomItem(carTemplates)
+    const opponentView = carTemplateFactory.instantiate(template)
     const opponentCar = new CarAggregate()
     const opponentRace = new Race(TARGET_LAPS, road.startAngle, road.totalLength)
 
@@ -383,13 +268,14 @@ function createOpponents(sourceView: CarView): void {
       race: opponentRace,
       driver: new OpponentDriver({
         maxSpeed: MAX_FORWARD_SPEED,
-        maxSteer: MAX_STEER,
-        speedFactor: settings.speedFactor,
-        accelerationFactor: settings.accelerationFactor,
+        maxSteer: MAX_STEER * template.spec.handlingFactor,
+        speedFactor: settings.speedFactor * template.spec.maxSpeedFactor,
+        accelerationFactor: settings.accelerationFactor * template.spec.accelerationFactor,
         aggression: settings.aggression,
         lineBias: settings.lineBias,
       }),
       minimapColor: settings.minimapColor,
+      vehicleSpec: template.spec,
     })
   }
 }
@@ -418,13 +304,14 @@ function placeCarOnStartGrid(
 }
 
 function snapCarToSurface(view: CarView, extraRideHeight = 0): void {
+  const bounds = carTemplateFactory.getBounds(view)
   const carPosition = view.copyPosition(tmpCarPosition)
   const surface = getSurfaceAt(carPosition.x, carPosition.z)
-  view.setY(surface.height - carLocalMinY + carRideHeightOffset + extraRideHeight)
+  view.setY(surface.height - bounds.minY + getRideHeightOffset(surface) + extraRideHeight)
   view.updateMatrixWorld(true)
   view.setBoxFromObject(tmpBox)
 
-  const minAllowedY = surface.height + CAR_GROUND_CLEARANCE + extraRideHeight
+  const minAllowedY = surface.height + getGroundClearance(surface) + extraRideHeight
   if (tmpBox.min.y < minAllowedY) {
     view.translateY(minAllowedY - tmpBox.min.y)
   }
@@ -433,16 +320,17 @@ function snapCarToSurface(view: CarView, extraRideHeight = 0): void {
 }
 
 function resolveGroundPenetration(view: CarView, extraRideHeight = 0): void {
+  const bounds = carTemplateFactory.getBounds(view)
   tmpBox.makeEmpty()
 
-  const insetX = Math.max((carLocalMaxX - carLocalMinX) * 0.12, 0.08)
-  const insetZ = Math.max((carLocalMaxZ - carLocalMinZ) * 0.12, 0.08)
+  const insetX = Math.max((bounds.maxX - bounds.minX) * 0.12, 0.08)
+  const insetZ = Math.max((bounds.maxZ - bounds.minZ) * 0.12, 0.08)
   const samplePoints: Array<[number, number, number]> = [
-    [0, carLocalMinY, 0],
-    [carLocalMinX + insetX, carLocalMinY, carLocalMinZ + insetZ],
-    [carLocalMaxX - insetX, carLocalMinY, carLocalMinZ + insetZ],
-    [carLocalMinX + insetX, carLocalMinY, carLocalMaxZ - insetZ],
-    [carLocalMaxX - insetX, carLocalMinY, carLocalMaxZ - insetZ],
+    [0, bounds.minY, 0],
+    [bounds.minX + insetX, bounds.minY, bounds.minZ + insetZ],
+    [bounds.maxX - insetX, bounds.minY, bounds.minZ + insetZ],
+    [bounds.minX + insetX, bounds.minY, bounds.maxZ - insetZ],
+    [bounds.maxX - insetX, bounds.minY, bounds.maxZ - insetZ],
   ]
 
   let maxLift = 0
@@ -451,7 +339,7 @@ function resolveGroundPenetration(view: CarView, extraRideHeight = 0): void {
     view.worldPointFromLocal(x, y, z, tmpVecE)
 
     const surface = getSurfaceAt(tmpVecE.x, tmpVecE.z)
-    const lift = surface.height + CAR_GROUND_CLEARANCE + extraRideHeight - tmpVecE.y
+    const lift = surface.height + getGroundClearance(surface) + extraRideHeight - tmpVecE.y
 
     if (lift > maxLift) {
       maxLift = lift
@@ -464,12 +352,20 @@ function resolveGroundPenetration(view: CarView, extraRideHeight = 0): void {
 
   view.setBoxFromObject(tmpBox)
   const carPosition = view.copyPosition(tmpCarPosition)
-  const centerSurface = getSurfaceAt(carPosition.x, carPosition.z).height
-  const bboxLift = centerSurface + CAR_GROUND_CLEARANCE + extraRideHeight - tmpBox.min.y
+  const centerSurface = getSurfaceAt(carPosition.x, carPosition.z)
+  const bboxLift = centerSurface.height + getGroundClearance(centerSurface) + extraRideHeight - tmpBox.min.y
 
   if (bboxLift > 0) {
     view.translateY(bboxLift)
   }
+}
+
+function getRideHeightOffset(surface: RoadSurfaceData): number {
+  return carRideHeightOffset + (surface.onRoad ? 0 : OFFROAD_RIDE_HEIGHT_BOOST)
+}
+
+function getGroundClearance(surface: RoadSurfaceData): number {
+  return surface.onRoad ? CAR_GROUND_CLEARANCE : OFFROAD_GROUND_CLEARANCE
 }
 
 function resolveObstacleCollisions(): void {
@@ -478,18 +374,19 @@ function resolveObstacleCollisions(): void {
 }
 
 function resolveObstacleCollisionsFor(view: CarView, car: CarAggregate): void {
+  const colliderRadius = carTemplateFactory.getBounds(view).colliderRadius
   const carPosition = view.copyPosition(tmpCarPosition)
   const nearbyObstacles = decorations.getNearbyObstacles(
     carPosition.x,
     carPosition.z,
-    CAR_COLLIDER_RADIUS + 8
+    colliderRadius + 8
   )
 
   for (const obstacle of nearbyObstacles) {
     const dx = carPosition.x - obstacle.x
     const dz = carPosition.z - obstacle.z
     const distSq = dx * dx + dz * dz
-    const minDist = CAR_COLLIDER_RADIUS + obstacle.radius
+    const minDist = colliderRadius + obstacle.radius
 
     if (distSq < minDist * minDist) {
       let dist = Math.sqrt(distSq)
@@ -566,6 +463,8 @@ function applyDrivePhysics(
   const absSpeed = car.absSpeed
   const speedRatio = clamp(absSpeed, 0, controls.maxForwardSpeed) / controls.maxForwardSpeed
   const accelCurve = 1 - Math.pow(speedRatio, 1.8)
+  const handlingFactor = controls.handlingFactor ?? 1
+  const gripFactor = controls.gripFactor ?? 1
   car.updateTransmission(delta, controls.maxForwardSpeed, controls.canDrive ? controls.throttle : 0)
 
   if (controls.canDrive && controls.throttle > 0) {
@@ -610,7 +509,8 @@ function applyDrivePhysics(
 
   limitSpeedBySurface(car, controls.maxForwardSpeed, surfaceSpeedFactor, delta)
 
-  const maxSteerAtSpeed = THREE.MathUtils.lerp(MAX_STEER, MAX_STEER * 0.42, speedRatio)
+  const maxSteer = MAX_STEER * handlingFactor
+  const maxSteerAtSpeed = THREE.MathUtils.lerp(maxSteer, maxSteer * 0.42, speedRatio)
   const steerTarget = controls.canDrive ? controls.steer * maxSteerAtSpeed : 0
   const steerSpeed = controls.canDrive && Math.abs(controls.steer) > 0.01 ? STEER_SPEED : STEER_RETURN
   car.steerToward(steerTarget, steerSpeed * delta)
@@ -625,6 +525,7 @@ function applyDrivePhysics(
   const desiredYawVelocity =
     car.steer *
     TURN_RATE *
+    handlingFactor *
     (0.22 + turnStrength * 0.96) *
     reverseTurnFactor *
     (currentSurface.onRoad ? 1 : 0.72) +
@@ -649,7 +550,8 @@ function applyDrivePhysics(
       Math.abs(car.speed),
       forwardLerp
     ) * Math.sign(car.speed || forwardSpeed || 1)
-  const lateralGripBase = currentSurface.onRoad ? LATERAL_GRIP_ROAD : LATERAL_GRIP_OFFROAD
+  const lateralGripBase =
+    (currentSurface.onRoad ? LATERAL_GRIP_ROAD : LATERAL_GRIP_OFFROAD) * gripFactor
   const handbrakeGripFactor = controls.canDrive && controls.brake ? 0.34 : 1
   const steeringSlipFactor = THREE.MathUtils.lerp(1, 0.62, driftFactor)
   const recoveryGrip = THREE.MathUtils.lerp(1, 1.35, expLerpFactor(DRIFT_RECOVERY, delta))
@@ -662,7 +564,8 @@ function applyDrivePhysics(
 
   view.copyPosition(tmpCarPosition)
   const surface = getSurfaceAt(tmpCarPosition.x, tmpCarPosition.z)
-  const targetY = surface.height - carLocalMinY + carRideHeightOffset + controls.extraRideHeight
+  const targetY =
+    surface.height - carTemplateFactory.getBounds(view).minY + getRideHeightOffset(surface) + controls.extraRideHeight
   view.setY(
     THREE.MathUtils.lerp(
       tmpCarPosition.y,
@@ -708,8 +611,10 @@ function updateDrive(delta: number): void {
   const roadBand = road.getBandData(carPosition.x, carPosition.z)
   const currentSurface = getSurfaceAt(carPosition.x, carPosition.z)
   const surfaceSpeedFactor = getSurfaceSpeedFactor(carPosition.x, carPosition.z, roadBand)
+  const vehicleSpec = playerVehicleSpec ?? vehicleSpecs[0]
+  const playerMaxForwardSpeed = MAX_FORWARD_SPEED * vehicleSpec.maxSpeedFactor
   const absSpeed = carAggregate.absSpeed
-  const speedRatio = clamp(absSpeed, 0, MAX_FORWARD_SPEED) / MAX_FORWARD_SPEED
+  const speedRatio = clamp(absSpeed, 0, playerMaxForwardSpeed) / playerMaxForwardSpeed
 
   const raceSnapshot = race.snapshot()
   const canDrive = gamePhase === 'running' && !raceSnapshot.finished
@@ -717,10 +622,16 @@ function updateDrive(delta: number): void {
   const reverseRatio = clamp(Math.abs(Math.min(carAggregate.speed, 0)) / MAX_REVERSE_SPEED, 0, 1)
   const reverseCurve = 1 - Math.pow(reverseRatio, 1.35)
   const throttleInput = canDrive && keys.forward ? 1 : canDrive && keys.backward ? -1 : 0
-  carAggregate.updateTransmission(delta, MAX_FORWARD_SPEED, throttleInput)
+  carAggregate.updateTransmission(delta, playerMaxForwardSpeed, throttleInput)
 
   if (canDrive && keys.forward) {
-    carAggregate.accelerate(BASE_ACCEL * accelCurve * carAggregate.shiftAccelerationFactor * delta)
+    carAggregate.accelerate(
+      BASE_ACCEL *
+        vehicleSpec.accelerationFactor *
+        accelCurve *
+        carAggregate.shiftAccelerationFactor *
+        delta
+    )
   }
 
   if (canDrive && keys.backward) {
@@ -756,9 +667,14 @@ function updateDrive(delta: number): void {
     }
   }
 
-  limitSpeedBySurface(carAggregate, MAX_FORWARD_SPEED, surfaceSpeedFactor, delta)
+  limitSpeedBySurface(carAggregate, playerMaxForwardSpeed, surfaceSpeedFactor, delta)
 
-  const maxSteerAtSpeed = THREE.MathUtils.lerp(MAX_STEER, MAX_STEER * 0.42, speedRatio)
+  const playerMaxSteer = MAX_STEER * vehicleSpec.handlingFactor
+  const maxSteerAtSpeed = THREE.MathUtils.lerp(
+    playerMaxSteer,
+    playerMaxSteer * 0.42,
+    speedRatio
+  )
   let steerTarget = 0
   if (canDrive && keys.left) steerTarget = maxSteerAtSpeed
   if (canDrive && keys.right) steerTarget = -maxSteerAtSpeed
@@ -776,6 +692,7 @@ function updateDrive(delta: number): void {
   const desiredYawVelocity =
     carAggregate.steer *
     TURN_RATE *
+    vehicleSpec.handlingFactor *
     (0.22 + turnStrength * 0.96) *
     reverseTurnFactor *
     (currentSurface.onRoad ? 1 : 0.72) +
@@ -802,7 +719,9 @@ function updateDrive(delta: number): void {
       Math.abs(carAggregate.speed),
       forwardLerp
     ) * Math.sign(carAggregate.speed || forwardSpeed || 1)
-  const lateralGripBase = currentSurface.onRoad ? LATERAL_GRIP_ROAD : LATERAL_GRIP_OFFROAD
+  const lateralGripBase =
+    (currentSurface.onRoad ? LATERAL_GRIP_ROAD : LATERAL_GRIP_OFFROAD) *
+    vehicleSpec.gripFactor
   const handbrakeGripFactor = canDrive && keys.brake ? 0.34 : 1
   const steeringSlipFactor = THREE.MathUtils.lerp(1, 0.62, driftFactor)
   const recoveryGrip = THREE.MathUtils.lerp(1, 1.35, expLerpFactor(DRIFT_RECOVERY, delta))
@@ -817,7 +736,7 @@ function updateDrive(delta: number): void {
   carView.copyPosition(tmpCarPosition)
   const surface = getSurfaceAt(tmpCarPosition.x, tmpCarPosition.z)
 
-  const targetY = surface.height - carLocalMinY + carRideHeightOffset
+  const targetY = surface.height - carTemplateFactory.getBounds(carView).minY + getRideHeightOffset(surface)
   carView.setY(
     THREE.MathUtils.lerp(
       tmpCarPosition.y,
@@ -857,7 +776,7 @@ function updateDrive(delta: number): void {
   resolveGroundPenetration(carView)
 
   carView.copyPosition(tmpCarPosition)
-  decorations.updateVisibility(tmpCarPosition)
+  decorations.updateVisibility(tmpCarPosition, delta)
   carShadow.update(tmpCarPosition, surface.height, carAggregate.heading, carAggregate.speed)
 
   const currentRoadBand = road.getBandData(tmpCarPosition.x, tmpCarPosition.z)
@@ -908,6 +827,8 @@ function updateOpponents(delta: number): void {
         canDrive: opponentCanDrive,
         maxForwardSpeed: MAX_FORWARD_SPEED * controls.speedFactor,
         accelerationFactor: controls.accelerationFactor,
+        handlingFactor: competitor.vehicleSpec.handlingFactor,
+        gripFactor: competitor.vehicleSpec.gripFactor,
         extraRideHeight: OPPONENT_RIDE_HEIGHT_EXTRA,
       },
       delta
@@ -1011,7 +932,8 @@ function resolveCompetitorCollisions(): void {
         const dx = firstPosition.x - secondPosition.x
         const dz = firstPosition.z - secondPosition.z
         const distSq = dx * dx + dz * dz
-        const minDist = COMPETITOR_COLLIDER_RADIUS * 2
+        const minDist =
+          carTemplateFactory.getBounds(first.view).colliderRadius + carTemplateFactory.getBounds(second.view).colliderRadius
 
         if (distSq >= minDist * minDist) continue
 
@@ -1105,7 +1027,12 @@ function updateCompetitionUi(delta: number): void {
     hasRankedCompetition = true
   }
 
-  positionLabelView.update(positionLabelTargets, camera, renderer)
+  labelUpdateTimer -= delta
+
+  if (labelUpdateTimer <= 0) {
+    labelUpdateTimer = qualitySettings.uiLabelUpdateInterval
+    positionLabelView.update(positionLabelTargets, camera, renderer)
+  }
 }
 
 function animate(): void {
@@ -1118,7 +1045,6 @@ function animate(): void {
     return
   }
 
-  surfaceCache.clear()
   updateCountdown(delta)
   updateDrive(delta)
   updateOpponents(delta)
@@ -1128,7 +1054,12 @@ function animate(): void {
   skidTrail.update(carView, carAggregate, keys, road, terrain)
   cameraRig.update(carView, carAggregate.heading, carAggregate.speed, delta)
   speedLines.update(carAggregate.speed, delta)
-  minimap.draw(getMinimapMarkers())
+  minimapUpdateTimer -= delta
+
+  if (minimapUpdateTimer <= 0) {
+    minimapUpdateTimer = qualitySettings.minimapUpdateInterval
+    minimap.draw(getMinimapMarkers())
+  }
 
   gameRenderer.render()
 }

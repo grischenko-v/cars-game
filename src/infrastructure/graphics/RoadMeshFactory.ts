@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { TrackModel } from '../../domain/road/TrackModel'
+import type { PbrTextureSet } from './TextureFactory'
 import { loadRepeatingPbrTextures } from './TextureFactory'
 
 export interface RoadSceneMeshes {
@@ -58,10 +59,11 @@ export class RoadMeshFactory {
       1.8
     )
     const roadMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7a7d7b,
+      color: 0xffffff,
       map: asphaltTextures.map,
       normalMap: asphaltTextures.normalMap,
       roughnessMap: asphaltTextures.roughnessMap,
+      vertexColors: true,
       roughness: 0.96,
       metalness: 0.02,
       normalScale: new THREE.Vector2(0.42, 0.42),
@@ -98,14 +100,35 @@ export class RoadMeshFactory {
     shoulder.renderOrder = 1
 
     const laneMarkMaterial = new THREE.MeshBasicMaterial({
-      color: 0xf5f2d8,
+      color: 0xffffff,
       side: THREE.DoubleSide,
-      depthWrite: false,
+      depthWrite: true,
       polygonOffset: true,
-      polygonOffsetFactor: -6,
-      polygonOffsetUnits: -6,
+      polygonOffsetFactor: -10,
+      polygonOffsetUnits: -10,
     })
     const markingGroup = new THREE.Group()
+    const asphaltRepairs = new THREE.Mesh(
+      this.buildAsphaltRepairGeometry(track),
+      new THREE.MeshStandardMaterial({
+        color: 0x656b67,
+        map: asphaltTextures.map,
+        normalMap: asphaltTextures.normalMap,
+        roughnessMap: asphaltTextures.roughnessMap,
+        roughness: 0.98,
+        metalness: 0.01,
+        normalScale: new THREE.Vector2(0.24, 0.24),
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -7,
+        polygonOffsetUnits: -7,
+      })
+    )
+    asphaltRepairs.frustumCulled = false
+    asphaltRepairs.receiveShadow = true
+    asphaltRepairs.renderOrder = 6
+    const asphaltVariationMeshes = this.buildAsphaltVariationMeshes(track, asphaltTextures)
     const asphaltWear = new THREE.Mesh(
       this.buildAsphaltWearGeometry(track),
       new THREE.MeshBasicMaterial({
@@ -127,6 +150,10 @@ export class RoadMeshFactory {
     startGrid.renderOrder = 9
     const roadsideGroup = this.buildRoadsideInfrastructure(track)
     markingGroup.renderOrder = 8
+    markingGroup.add(asphaltRepairs)
+    for (const mesh of asphaltVariationMeshes) {
+      markingGroup.add(mesh)
+    }
     markingGroup.add(asphaltWear)
     markingGroup.add(laneMarking)
     markingGroup.add(startGrid)
@@ -161,8 +188,10 @@ export class RoadMeshFactory {
     const positions: number[] = []
     const normals: number[] = []
     const uvs: number[] = []
+    const colors: number[] = []
     const indices: number[] = []
     let u = 0
+    const color = new THREE.Color()
 
     for (let i = 0; i < leftLoop.length; i++) {
       const left = leftLoop[i]
@@ -172,10 +201,13 @@ export class RoadMeshFactory {
         u += left.distanceTo(leftLoop[i - 1])
       }
       const normal = track.getBankedNormalAtDistance(track.cumulativeLengths[i] ?? 0)
+      const shade = this.getAsphaltShadeAtDistance(track.cumulativeLengths[i] ?? 0)
+      color.setRGB(0.48 * shade, 0.5 * shade, 0.49 * shade)
 
       positions.push(left.x, left.y, left.z, right.x, right.y, right.z)
       normals.push(normal.x, normal.y, normal.z, normal.x, normal.y, normal.z)
       uvs.push(u * 0.02, 1, u * 0.02, 0)
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b)
     }
 
     for (let i = 0; i < leftLoop.length; i++) {
@@ -195,6 +227,10 @@ export class RoadMeshFactory {
       new THREE.Float32BufferAttribute(new Float32Array(normals), 3)
     )
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(uvs), 2))
+    geometry.setAttribute(
+      'color',
+      new THREE.Float32BufferAttribute(new Float32Array(colors), 3)
+    )
     geometry.setIndex(indices)
     geometry.computeBoundingSphere()
     return geometry
@@ -281,50 +317,27 @@ export class RoadMeshFactory {
     const dashSpacing = 18
     const dashLength = 5.2
     const dashWidth = 0.46
-    const edgeWidth = 0.34
     const dashCount = Math.max(24, Math.floor(track.totalLength / dashSpacing))
+
+    this.addContinuousEdgeLine(track, -1, positions, normals, uvs, indices)
+    this.addContinuousEdgeLine(track, 1, positions, normals, uvs, indices)
 
     for (let i = 0; i < dashCount; i++) {
       const centerDistance = (i / dashCount) * track.totalLength
       const laneCount = track.getEffectiveLaneCountAtDistance(centerDistance)
+      const laneMarkingWidth = laneCount * track.nominalLaneWidth
+
+      if (this.isLaneMarkingTransition(track, centerDistance, dashLength)) continue
 
       for (let separator = 1; separator < laneCount; separator++) {
         this.addLaneSeparatorDash(
           track,
           centerDistance,
           separator / laneCount,
+          laneMarkingWidth,
           dashLength,
           dashWidth,
           0.2,
-          positions,
-          normals,
-          uvs,
-          indices
-        )
-      }
-
-      if (i % 2 === 0) {
-        this.addEdgeDash(
-          track,
-          centerDistance,
-          -1,
-          edgeWidth * 1.8,
-          dashLength * 0.82,
-          edgeWidth,
-          0.21,
-          positions,
-          normals,
-          uvs,
-          indices
-        )
-        this.addEdgeDash(
-          track,
-          centerDistance,
-          1,
-          edgeWidth * 1.8,
-          dashLength * 0.82,
-          edgeWidth,
-          0.21,
           positions,
           normals,
           uvs,
@@ -348,10 +361,29 @@ export class RoadMeshFactory {
     return geometry
   }
 
+  private isLaneMarkingTransition(
+    track: TrackModel,
+    centerDistance: number,
+    length: number
+  ): boolean {
+    const startDistance = centerDistance - length * 0.5
+    const endDistance = centerDistance + length * 0.5
+    const laneCount = track.getEffectiveLaneCountAtDistance(centerDistance)
+
+    return (
+      track.isLaneTransitionAtDistance(startDistance, length) ||
+      track.isLaneTransitionAtDistance(centerDistance, length) ||
+      track.isLaneTransitionAtDistance(endDistance, length) ||
+      track.getEffectiveLaneCountAtDistance(startDistance) !== laneCount ||
+      track.getEffectiveLaneCountAtDistance(endDistance) !== laneCount
+    )
+  }
+
   private addLaneSeparatorDash(
     track: TrackModel,
     centerDistance: number,
     laneFraction: number,
+    markingWidth: number,
     length: number,
     width: number,
     lift: number,
@@ -362,10 +394,16 @@ export class RoadMeshFactory {
   ): void {
     const startDistance = centerDistance - length * 0.5
     const endDistance = centerDistance + length * 0.5
-    const startHalfWidth = track.getTrackHalfWidthAtDistance(startDistance)
-    const endHalfWidth = track.getTrackHalfWidthAtDistance(endDistance)
-    const startOffset = -startHalfWidth + startHalfWidth * 2 * laneFraction
-    const endOffset = -endHalfWidth + endHalfWidth * 2 * laneFraction
+    const startMarkingHalfWidth = Math.min(
+      track.getTrackHalfWidthAtDistance(startDistance) * 2 - 1.2,
+      markingWidth
+    ) * 0.5
+    const endMarkingHalfWidth = Math.min(
+      track.getTrackHalfWidthAtDistance(endDistance) * 2 - 1.2,
+      markingWidth
+    ) * 0.5
+    const startOffset = -startMarkingHalfWidth + startMarkingHalfWidth * 2 * laneFraction
+    const endOffset = -endMarkingHalfWidth + endMarkingHalfWidth * 2 * laneFraction
 
     this.addRoadDashWithOffsets(
       track,
@@ -382,37 +420,43 @@ export class RoadMeshFactory {
     )
   }
 
-  private addEdgeDash(
+  private addContinuousEdgeLine(
     track: TrackModel,
-    centerDistance: number,
     sideSign: number,
-    edgeInset: number,
-    length: number,
-    width: number,
-    lift: number,
     positions: number[],
     normals: number[],
     uvs: number[],
     indices: number[]
   ): void {
-    const startDistance = centerDistance - length * 0.5
-    const endDistance = centerDistance + length * 0.5
-    const startOffset = sideSign * (track.getTrackHalfWidthAtDistance(startDistance) - edgeInset)
-    const endOffset = sideSign * (track.getTrackHalfWidthAtDistance(endDistance) - edgeInset)
+    const edgeInset = 0.12
+    const edgeWidth = 0.34
+    const sampleCount = Math.max(track.centerline.length, Math.floor(track.totalLength / 4))
 
-    this.addRoadDashWithOffsets(
-      track,
-      startDistance,
-      endDistance,
-      startOffset,
-      endOffset,
-      width,
-      lift,
-      positions,
-      normals,
-      uvs,
-      indices
-    )
+    for (let i = 0; i < sampleCount; i++) {
+      const distance = (i / sampleCount) * track.totalLength
+      const nextDistance = ((i + 1) / sampleCount) * track.totalLength
+      const halfWidth = track.getTrackHalfWidthAtDistance(distance)
+      const nextHalfWidth = track.getTrackHalfWidthAtDistance(nextDistance)
+      const outerOffset = sideSign * Math.max(0, halfWidth - edgeInset)
+      const innerOffset = sideSign * Math.max(0, halfWidth - edgeInset - edgeWidth)
+      const nextOuterOffset = sideSign * Math.max(0, nextHalfWidth - edgeInset)
+      const nextInnerOffset = sideSign * Math.max(0, nextHalfWidth - edgeInset - edgeWidth)
+      const base = positions.length / 3
+
+      this.addRoadPaintPoint(track, distance, outerOffset, 0.24, positions, normals)
+      this.addRoadPaintPoint(track, distance, innerOffset, 0.24, positions, normals)
+      this.addRoadPaintPoint(track, nextDistance, nextOuterOffset, 0.24, positions, normals)
+      this.addRoadPaintPoint(track, nextDistance, nextInnerOffset, 0.24, positions, normals)
+      uvs.push(0, 0, 0, 1, 1, 0, 1, 1)
+
+      if (sideSign > 0) {
+        indices.push(base, base + 1, base + 2)
+        indices.push(base + 1, base + 3, base + 2)
+      } else {
+        indices.push(base, base + 2, base + 1)
+        indices.push(base + 1, base + 2, base + 3)
+      }
+    }
   }
 
   private addRoadDashWithOffsets(
@@ -482,12 +526,34 @@ export class RoadMeshFactory {
     indices.push(base + 1, base + 3, base + 2)
   }
 
+  private addRoadPaintPoint(
+    track: TrackModel,
+    distance: number,
+    lateralOffset: number,
+    lift: number,
+    positions: number[],
+    normals: number[]
+  ): void {
+    const center = new THREE.Vector3()
+    const tangent = new THREE.Vector3()
+    const normal = track.getBankedNormalAtDistance(distance)
+    const side = new THREE.Vector3()
+
+    track.sampleCenterlineByDistance(distance, center, tangent)
+    side.set(-tangent.z, 0, tangent.x).normalize()
+    center.addScaledVector(side, lateralOffset)
+    center.y = track.getBankedHeightAtDistance(distance, lateralOffset, track.roadY) + lift
+
+    positions.push(center.x, center.y, center.z)
+    normals.push(normal.x, normal.y, normal.z)
+  }
+
   private buildAsphaltWearGeometry(track: TrackModel): THREE.BufferGeometry {
     const positions: number[] = []
     const normals: number[] = []
     const uvs: number[] = []
     const indices: number[] = []
-    const wearCount = Math.max(120, Math.floor(track.totalLength / 18))
+    const wearCount = Math.max(80, Math.floor(track.totalLength / 28))
     const center = new THREE.Vector3()
     const tangent = new THREE.Vector3()
 
@@ -558,6 +624,233 @@ export class RoadMeshFactory {
     return geometry
   }
 
+  private buildAsphaltRepairGeometry(track: TrackModel): THREE.BufferGeometry {
+    const positions: number[] = []
+    const normals: number[] = []
+    const uvs: number[] = []
+    const indices: number[] = []
+    const repairCount = Math.max(12, Math.floor(track.totalLength / 220))
+    const center = new THREE.Vector3()
+    const tangent = new THREE.Vector3()
+
+    for (let i = 0; i < repairCount; i++) {
+      const seed = i + 2
+      const distance =
+        (i / repairCount) * track.totalLength +
+        (this.pseudoRandom(seed * 5.7) - 0.5) * 64
+      const halfWidth = track.getTrackHalfWidthAtDistance(distance)
+      const offset = (this.pseudoRandom(seed * 9.1) * 2 - 1) * halfWidth * 0.42
+      const length = THREE.MathUtils.lerp(14, 36, this.pseudoRandom(seed * 3.4))
+      const width = Math.min(
+        halfWidth * THREE.MathUtils.lerp(0.46, 1.35, this.pseudoRandom(seed * 6.2)),
+        halfWidth * 1.72
+      )
+
+      track.sampleCenterlineByDistance(distance, center, tangent)
+      center.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x).normalize(), offset)
+      this.addOrientedRect(
+        positions,
+        normals,
+        uvs,
+        indices,
+        center,
+        tangent,
+        length,
+        width,
+        track.roadY,
+        false,
+        track,
+        0.13
+      )
+    }
+
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(new Float32Array(positions), 3)
+    )
+    geometry.setAttribute(
+      'normal',
+      new THREE.Float32BufferAttribute(new Float32Array(normals), 3)
+    )
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(uvs), 2))
+    geometry.setIndex(indices)
+    geometry.computeBoundingSphere()
+    return geometry
+  }
+
+  private buildAsphaltVariationMeshes(
+    track: TrackModel,
+    asphaltTextures: PbrTextureSet
+  ): THREE.Mesh[] {
+    return [
+      this.createAsphaltVariationMesh(
+        track,
+        asphaltTextures,
+        {
+          color: 0x565d59,
+          normalScale: 0.16,
+          roughness: 0.99,
+          seedOffset: 17,
+          spacing: 360,
+          minLength: 18,
+          maxLength: 44,
+          minWidthFactor: 0.28,
+          maxWidthFactor: 0.72,
+          opacity: 1,
+        }
+      ),
+      this.createAsphaltVariationMesh(
+        track,
+        asphaltTextures,
+        {
+          color: 0x343a39,
+          normalScale: 0.28,
+          roughness: 0.94,
+          seedOffset: 43,
+          spacing: 480,
+          minLength: 34,
+          maxLength: 78,
+          minWidthFactor: 0.42,
+          maxWidthFactor: 1.08,
+          opacity: 1,
+        }
+      ),
+      this.createAsphaltVariationMesh(
+        track,
+        asphaltTextures,
+        {
+          color: 0x777468,
+          normalScale: 0.1,
+          roughness: 1,
+          seedOffset: 71,
+          spacing: 640,
+          minLength: 22,
+          maxLength: 56,
+          minWidthFactor: 0.22,
+          maxWidthFactor: 0.54,
+          opacity: 1,
+        }
+      ),
+    ]
+  }
+
+  private createAsphaltVariationMesh(
+    track: TrackModel,
+    asphaltTextures: PbrTextureSet,
+    options: {
+      color: number
+      normalScale: number
+      roughness: number
+      seedOffset: number
+      spacing: number
+      minLength: number
+      maxLength: number
+      minWidthFactor: number
+      maxWidthFactor: number
+      opacity: number
+    }
+  ): THREE.Mesh {
+    const geometry = this.buildAsphaltPatchGeometry(track, options)
+    const material = new THREE.MeshStandardMaterial({
+      color: options.color,
+      map: asphaltTextures.map,
+      normalMap: asphaltTextures.normalMap,
+      roughnessMap: asphaltTextures.roughnessMap,
+      roughness: options.roughness,
+      metalness: 0.01,
+      normalScale: new THREE.Vector2(options.normalScale, options.normalScale),
+      side: THREE.DoubleSide,
+      transparent: false,
+      opacity: options.opacity,
+      depthWrite: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    mesh.receiveShadow = true
+    mesh.renderOrder = 6
+
+    return mesh
+  }
+
+  private buildAsphaltPatchGeometry(
+    track: TrackModel,
+    options: {
+      seedOffset: number
+      spacing: number
+      minLength: number
+      maxLength: number
+      minWidthFactor: number
+      maxWidthFactor: number
+    }
+  ): THREE.BufferGeometry {
+    const positions: number[] = []
+    const normals: number[] = []
+    const uvs: number[] = []
+    const indices: number[] = []
+    const patchCount = Math.max(5, Math.floor(track.totalLength / options.spacing))
+    const center = new THREE.Vector3()
+    const tangent = new THREE.Vector3()
+
+    for (let i = 0; i < patchCount; i++) {
+      const seed = i + options.seedOffset
+      const distance =
+        (i / patchCount) * track.totalLength +
+        (this.pseudoRandom(seed * 3.3) - 0.5) * options.spacing * 0.62
+      const halfWidth = track.getTrackHalfWidthAtDistance(distance)
+      const usableHalfWidth = Math.max(halfWidth - 1.4, 1)
+      const offset = (this.pseudoRandom(seed * 5.1) * 2 - 1) * usableHalfWidth * 0.46
+      const length = THREE.MathUtils.lerp(
+        options.minLength,
+        options.maxLength,
+        this.pseudoRandom(seed * 7.7)
+      )
+      const width = Math.min(
+        usableHalfWidth * 2,
+        halfWidth *
+          THREE.MathUtils.lerp(
+            options.minWidthFactor,
+            options.maxWidthFactor,
+            this.pseudoRandom(seed * 9.9)
+          )
+      )
+
+      track.sampleCenterlineByDistance(distance, center, tangent)
+      center.addScaledVector(new THREE.Vector3(-tangent.z, 0, tangent.x).normalize(), offset)
+      this.addOrientedRect(
+        positions,
+        normals,
+        uvs,
+        indices,
+        center,
+        tangent,
+        length,
+        width,
+        track.roadY,
+        false,
+        track,
+        0.026
+      )
+    }
+
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(new Float32Array(positions), 3)
+    )
+    geometry.setAttribute(
+      'normal',
+      new THREE.Float32BufferAttribute(new Float32Array(normals), 3)
+    )
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(uvs), 2))
+    geometry.setIndex(indices)
+    geometry.computeBoundingSphere()
+    return geometry
+  }
+
   private buildRoadsideInfrastructure(track: TrackModel): THREE.Group {
     const group = new THREE.Group()
     const barrier = new THREE.Mesh(
@@ -587,7 +880,7 @@ export class RoadMeshFactory {
   private buildGuardrailBarrierGeometry(track: TrackModel): THREE.BufferGeometry {
     const positions: number[] = []
     const indices: number[] = []
-    const segmentLength = 4.5
+    const segmentLength = 7.5
     const segmentCount = Math.max(80, Math.floor(track.totalLength / segmentLength))
     const centerA = new THREE.Vector3()
     const centerB = new THREE.Vector3()
@@ -638,6 +931,9 @@ export class RoadMeshFactory {
     endDistance: number
   ): boolean {
     return (
+      !track.isLaneTransitionAtDistance(startDistance, 8) &&
+      !track.isLaneTransitionAtDistance(middleDistance, 8) &&
+      !track.isLaneTransitionAtDistance(endDistance, 8) &&
       track.getEffectiveLaneCountAtDistance(startDistance) >= 4 &&
       track.getEffectiveLaneCountAtDistance(middleDistance) >= 4 &&
       track.getEffectiveLaneCountAtDistance(endDistance) >= 4
@@ -776,6 +1072,15 @@ export class RoadMeshFactory {
     return sign * (roadHalfWidth + extraFromRoadEdge)
   }
 
+  private getAsphaltShadeAtDistance(distance: number): number {
+    const longWave = Math.sin(distance * 0.006) * 0.055
+    const patchWave = Math.sin(distance * 0.023 + Math.sin(distance * 0.004) * 1.8) * 0.035
+    const repairSection = Math.floor(distance / 190)
+    const repairTint = repairSection % 5 === 2 ? -0.08 : repairSection % 7 === 4 ? 0.045 : 0
+
+    return THREE.MathUtils.clamp(1 + longWave + patchWave + repairTint, 0.78, 1.12)
+  }
+
   private buildStartGridGeometry(track: TrackModel): THREE.BufferGeometry {
     const positions: number[] = []
     const normals: number[] = []
@@ -803,11 +1108,11 @@ export class RoadMeshFactory {
     )
 
     const slotLength = 6.2
-    const slotWidth = 3.2
+    const slotWidth = 3.45
     const lineWidth = 0.22
     const firstOpponentOffset = -5.1
     const rowSpacing = 7.2
-    const lateralOffset = startHalfWidth * 0.42
+    const lateralOffset = startHalfWidth * 0.26
     const slotCenters = [
       { distanceOffset: firstOpponentOffset, lateralOffset: -lateralOffset },
       { distanceOffset: firstOpponentOffset - rowSpacing, lateralOffset },
@@ -933,7 +1238,7 @@ export class RoadMeshFactory {
     const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize()
     const rectCenter = new THREE.Vector3()
 
-    rectCenter.copy(center).addScaledVector(tangent, length * 0.5)
+    rectCenter.copy(center).addScaledVector(tangent, length * 0.42)
     this.addOrientedRect(
       positions,
       normals,
@@ -949,7 +1254,7 @@ export class RoadMeshFactory {
       0.22
     )
 
-    rectCenter.copy(center).addScaledVector(tangent, -length * 0.5)
+    rectCenter.copy(center).addScaledVector(tangent, -length * 0.42)
     this.addOrientedRect(
       positions,
       normals,

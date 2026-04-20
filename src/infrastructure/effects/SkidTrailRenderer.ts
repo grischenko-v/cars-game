@@ -14,10 +14,13 @@ export class SkidTrailRenderer {
   private readonly tmpRight = new THREE.Vector3()
   private readonly tmpCarPosition = new THREE.Vector3()
   private readonly tmpRearCenter = new THREE.Vector3()
+  private readonly leftMark = new THREE.Vector3()
+  private readonly rightMark = new THREE.Vector3()
   private skidIndex = 0
   private drawCount = 0
-  private lastLeftMark: THREE.Vector3 | null = null
-  private lastRightMark: THREE.Vector3 | null = null
+  private readonly lastLeftMark = new THREE.Vector3()
+  private readonly lastRightMark = new THREE.Vector3()
+  private hasLastMarks = false
 
   constructor(scene: THREE.Scene) {
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3))
@@ -63,30 +66,31 @@ export class SkidTrailRenderer {
       .copy(car.copyPosition(this.tmpCarPosition))
       .addScaledVector(this.tmpForward, -rearOffset)
 
-    const leftMark = this.tmpRearCenter.clone().addScaledVector(this.tmpRight, -halfTrack)
-    const rightMark = this.tmpRearCenter.clone().addScaledVector(this.tmpRight, halfTrack)
+    this.leftMark.copy(this.tmpRearCenter).addScaledVector(this.tmpRight, -halfTrack)
+    this.rightMark.copy(this.tmpRearCenter).addScaledVector(this.tmpRight, halfTrack)
 
     const leftSurface = road.getHeightAndNormal(
-      leftMark.x,
-      leftMark.z,
-      terrain.getHeightAndNormal(leftMark.x, leftMark.z)
+      this.leftMark.x,
+      this.leftMark.z,
+      terrain.getHeightAndNormal(this.leftMark.x, this.leftMark.z)
     )
     const rightSurface = road.getHeightAndNormal(
-      rightMark.x,
-      rightMark.z,
-      terrain.getHeightAndNormal(rightMark.x, rightMark.z)
+      this.rightMark.x,
+      this.rightMark.z,
+      terrain.getHeightAndNormal(this.rightMark.x, this.rightMark.z)
     )
 
-    leftMark.y = leftSurface.height + 0.085
-    rightMark.y = rightSurface.height + 0.085
+    this.leftMark.y = leftSurface.height + 0.085
+    this.rightMark.y = rightSurface.height + 0.085
 
-    if (this.lastLeftMark && this.lastRightMark) {
-      this.addSegment(this.lastLeftMark, leftMark)
-      this.addSegment(this.lastRightMark, rightMark)
+    if (this.hasLastMarks) {
+      this.addSegment(this.lastLeftMark, this.leftMark)
+      this.addSegment(this.lastRightMark, this.rightMark)
     }
 
-    this.lastLeftMark = leftMark.clone()
-    this.lastRightMark = rightMark.clone()
+    this.lastLeftMark.copy(this.leftMark)
+    this.lastRightMark.copy(this.rightMark)
+    this.hasLastMarks = true
   }
 
   private addSegment(from: THREE.Vector3, to: THREE.Vector3): void {
@@ -104,7 +108,6 @@ export class SkidTrailRenderer {
   }
 
   private reset(): void {
-    this.lastLeftMark = null
-    this.lastRightMark = null
+    this.hasLastMarks = false
   }
 }

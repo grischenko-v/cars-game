@@ -9,6 +9,7 @@ export class SpeedLinesOverlay {
   private intensity = 0
   private pixelRatio = 1
   private hasVisibleFrame = false
+  private drawTimer = 0
 
   constructor(private readonly parent: HTMLElement = document.body) {
     const canvas = document.createElement('canvas')
@@ -49,6 +50,7 @@ export class SpeedLinesOverlay {
     this.canvas.style.setProperty('-webkit-backdrop-filter', this.canvas.style.backdropFilter)
     this.canvas.style.maskImage = mask
     this.canvas.style.setProperty('-webkit-mask-image', mask)
+    this.drawTimer -= delta
 
     if (this.intensity < 0.015 && targetIntensity < 0.015) {
       if (this.hasVisibleFrame) {
@@ -63,6 +65,9 @@ export class SpeedLinesOverlay {
       return
     }
 
+    if (this.drawTimer > 0) return
+
+    this.drawTimer = 1 / 30
     this.draw()
   }
 
@@ -123,7 +128,7 @@ export class SpeedLinesOverlay {
   }
 
   private resize(): void {
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.25)
     this.canvas.width = Math.floor(window.innerWidth * this.pixelRatio)
     this.canvas.height = Math.floor(window.innerHeight * this.pixelRatio)
     this.canvas.style.width = `${window.innerWidth}px`

@@ -1,0 +1,91 @@
+.standings-panel {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+  min-width: 286px;
+  padding: 12px;
+  color: #fff;
+  user-select: none;
+  background: linear-gradient(145deg, rgba(18, 20, 24, 0.68), rgba(34, 38, 43, 0.54));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.standings-race {
+  padding: 9px 10px;
+  margin-bottom: 10px;
+  line-height: 1.35;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+}
+
+.standings-race__main,
+.standings-race__sub,
+.standings-laps__row,
+.standings-entry {
+  display: grid;
+  gap: 12px;
+}
+
+.standings-race__main {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  color: #f3e7a4;
+  font-weight: 800;
+}
+
+.standings-race__sub {
+  grid-template-columns: 1fr auto;
+  margin-top: 3px;
+  font-size: 13px;
+  opacity: 0.84;
+}
+
+.standings-laps {
+  margin-top: 7px;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.standings-laps__row {
+  grid-template-columns: 1fr auto;
+}
+
+.standings-finish {
+  padding-top: 8px;
+  margin-top: 8px;
+  color: #f3e7a4;
+  font-weight: 700;
+  line-height: 1.45;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.standings-finish__restart {
+  margin-top: 5px;
+}
+
+.standings-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.standings-entry {
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  padding: 3px 0;
+}
+
+.standings-entry--player {
+  color: #ffe88e;
+}
+
+.standings-entry__lap {
+  opacity: 0.78;
+}

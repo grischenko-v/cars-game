@@ -146,7 +146,7 @@ export class Terrain {
         1
       )
       const k = THREE.MathUtils.smoothstep(t, 0, 1)
-      return THREE.MathUtils.lerp(shoulderBedHeight, baseHeight, k)
+      return THREE.MathUtils.lerp(apronBedHeight, baseHeight, k)
     }
 
     return baseHeight

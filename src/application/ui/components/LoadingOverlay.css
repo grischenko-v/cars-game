@@ -1,0 +1,30 @@
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  user-select: none;
+  background: radial-gradient(circle at center, rgba(26, 31, 36, 0.82), rgba(9, 12, 15, 0.94));
+  font-family: system-ui, sans-serif;
+}
+
+.loading-overlay__title {
+  font-size: clamp(48px, 11vw, 132px);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
+}
+
+.loading-overlay__details {
+  font-size: clamp(16px, 2vw, 24px);
+  opacity: 0.82;
+}
+
+.loading-overlay--error .loading-overlay__title {
+  color: #ff8b74;
+}
