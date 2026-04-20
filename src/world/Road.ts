@@ -9,6 +9,7 @@ export class Road {
   private readonly track: TrackModel
   private readonly meshFactory: RoadMeshFactory
 
+  terrainBackfill: THREE.Mesh | null = null
   apron: THREE.Mesh | null = null
   road: THREE.Mesh | null = null
   shoulder: THREE.Mesh | null = null
@@ -113,11 +114,13 @@ export class Road {
   attachTo(scene: THREE.Scene): void {
     const meshes = this.meshFactory.create(this.track)
 
+    this.terrainBackfill = meshes.terrainBackfill
     this.apron = meshes.apron
     this.road = meshes.road
     this.shoulder = meshes.shoulder
     this.markingGroup = meshes.markingGroup
 
+    scene.add(this.terrainBackfill)
     scene.add(this.apron)
     scene.add(this.road)
     scene.add(this.shoulder)
@@ -144,6 +147,22 @@ export class Road {
     return this.track.getBandData(x, z)
   }
 
+  getLaneCountAtDistance(distance: number): number {
+    return this.track.getLaneCountAtDistance(distance)
+  }
+
+  getEffectiveLaneCountAtDistance(distance: number): number {
+    return this.track.getEffectiveLaneCountAtDistance(distance)
+  }
+
+  getTrackHalfWidthAtDistance(distance: number): number {
+    return this.track.getTrackHalfWidthAtDistance(distance)
+  }
+
+  getOuterHalfWidthAtDistance(distance: number): number {
+    return this.track.getOuterHalfWidthAtDistance(distance)
+  }
+
   angleDistance(a: number, b: number): number {
     return this.track.angleDistance(a, b)
   }
@@ -162,5 +181,9 @@ export class Road {
     terrainData: { height: number; normal: THREE.Vector3 }
   ): RoadSurfaceData {
     return this.track.getHeightAndNormal(x, z, terrainData)
+  }
+
+  getBankedHeightAtDistance(distance: number, lateralOffset: number, baseY: number): number {
+    return this.track.getBankedHeightAtDistance(distance, lateralOffset, baseY)
   }
 }

@@ -6,7 +6,7 @@ import type { Road } from './Road'
 
 export class Terrain {
   road: Road
-  size = 1500
+  size = 2400
   segments = qualitySettings.terrainSegments
   geometry: THREE.PlaneGeometry
   material: THREE.MeshStandardMaterial
@@ -45,10 +45,10 @@ export class Terrain {
       roughnessMap: grassTextures.roughnessMap,
       roughness: 1,
       metalness: 0,
-      normalScale: new THREE.Vector2(0.55, 0.55),
+      normalScale: new THREE.Vector2(0.38, 0.38),
       polygonOffset: true,
-      polygonOffsetFactor: 6,
-      polygonOffsetUnits: 6,
+      polygonOffsetFactor: 9,
+      polygonOffsetUnits: 9,
     })
 
     this.mesh = new THREE.Mesh(this.geometry, this.material)
@@ -78,8 +78,43 @@ export class Terrain {
       THREE.MathUtils.smoothstep(calmT, 0, 1)
     )
     const baseHeight = this.rawHeight(x, z) * calmFactor
-    const roadBedHeight = this.road.roadY - this.road.cutDepth
-    const shoulderBedHeight = this.road.apronY - this.road.cutDepth * 0.35
+    const roadEdgeOffset = clamp(
+      roadBand.lateralOffset,
+      -roadBand.halfWidth,
+      roadBand.halfWidth
+    )
+    const outerHalfWidth = this.road.getOuterHalfWidthAtDistance(roadBand.distanceAlong)
+    const apronHalfWidth = outerHalfWidth + this.road.apronWidth
+    const shoulderEdgeOffset = clamp(
+      roadBand.lateralOffset,
+      -outerHalfWidth,
+      outerHalfWidth
+    )
+    const apronEdgeOffset = clamp(
+      roadBand.lateralOffset,
+      -apronHalfWidth,
+      apronHalfWidth
+    )
+    const roadBedHeight =
+      this.road.getBankedHeightAtDistance(
+        roadBand.distanceAlong,
+        roadEdgeOffset,
+        this.road.roadY
+      ) - this.road.cutDepth
+    const shoulderBedHeight =
+      this.road.getBankedHeightAtDistance(
+        roadBand.distanceAlong,
+        shoulderEdgeOffset,
+        this.road.apronY
+      ) -
+      this.road.cutDepth * 0.45
+    const apronBedHeight =
+      this.road.getBankedHeightAtDistance(
+        roadBand.distanceAlong,
+        apronEdgeOffset,
+        this.road.apronY
+      ) -
+      this.road.cutDepth * 0.55
     const hardRoadLimit = roadBand.halfWidth + this.road.terrainHardMargin
     const shoulderLimit =
       hardRoadLimit + this.road.shoulderWidth + this.road.terrainShoulderMargin
@@ -101,7 +136,7 @@ export class Terrain {
     }
 
     if (roadBand.distFromRoadCenter <= apronLimit) {
-      return shoulderBedHeight - this.road.cutDepth * 0.08
+      return apronBedHeight
     }
 
     if (roadBand.distFromRoadCenter <= apronLimit + this.road.terrainBlend) {
@@ -132,4 +167,5 @@ export class Terrain {
     const normal = new THREE.Vector3(-dx, 1, -dz).normalize()
     return { height: h, normal }
   }
+
 }

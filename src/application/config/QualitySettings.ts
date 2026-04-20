@@ -6,8 +6,8 @@ export interface QualitySettings {
 }
 
 export const qualitySettings: QualitySettings = {
-  decorationDrawDistance: 230,
-  maxPixelRatio: 1.5,
-  shadowMapSize: 1024,
-  terrainSegments: 180,
+  decorationDrawDistance: 320,
+  maxPixelRatio: 1.35,
+  shadowMapSize: 768,
+  terrainSegments: 150,
 }

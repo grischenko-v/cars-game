@@ -15,11 +15,21 @@ interface TurnSummary {
   curveNoisePenalty: number
 }
 
+type TrackFeatureKind = 'hairpin' | 'chicane' | 'doubleApex' | 'banking' | 'sCurves'
+
+interface TrackFeature {
+  kind: TrackFeatureKind
+  center: number
+  width: number
+  strength: number
+  sign: number
+}
+
 export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
   constructor(
     private readonly config = {
-      roadWidth: 34,
-      shoulderWidth: 6,
+      roadWidth: 28,
+      shoulderWidth: 5,
       roadY: 0.24,
       shoulderY: 0.17,
       apronY: 0.12,
@@ -28,7 +38,7 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
       cutDepth: 0.22,
       terrainCalmDistance: 34,
       terrainCalmFactor: 0.08,
-      terrainHardMargin: 5,
+      terrainHardMargin: 4.5,
       terrainShoulderMargin: 3,
       apronWidth: 8,
     }
@@ -114,27 +124,34 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
   }
 
   private buildRandomTrackCandidate(): THREE.Vector3[] {
-    const controlCount = this.randomInt(24, 34)
-    const stretchX = this.randomRange(1.12, 1.46)
-    const stretchZ = this.randomRange(0.86, 1.18)
-    const baseRadius = this.randomRange(205, 255)
-    const wobbleFrequencyA = this.randomInt(4, 7)
-    const wobbleFrequencyB = this.randomInt(5, 10)
-    const wobbleAmpA = this.randomRange(34, 58)
-    const wobbleAmpB = this.randomRange(18, 36)
+    const controlCount = this.randomInt(18, 24)
+    const stretchX = this.randomRange(1.18, 1.52)
+    const stretchZ = this.randomRange(0.92, 1.24)
+    const baseRadius = this.randomRange(380, 470)
+    const wobbleFrequencyA = this.randomInt(3, 5)
+    const wobbleFrequencyB = this.randomInt(4, 6)
+    const wobbleAmpA = this.randomRange(24, 46)
+    const wobbleAmpB = this.randomRange(12, 28)
     const wobblePhaseA = this.randomRange(0, Math.PI * 2)
     const wobblePhaseB = this.randomRange(0, Math.PI * 2)
+    const features = this.buildTrackFeatures()
     const controls: THREE.Vector3[] = []
 
     for (let i = 0; i < controlCount; i++) {
       const angle = (i / controlCount) * Math.PI * 2
-      const angularJitter = this.randomRange(-0.06, 0.06)
-      const sampleAngle = angle + angularJitter
-      const radius =
+      const angularJitter = this.randomRange(-0.035, 0.035)
+      const phase = i / controlCount
+      const angleOffset = this.getFeatureAngleOffset(phase, features)
+      const sampleAngle = angle + angularJitter + angleOffset
+      const featureRadiusOffset = this.getFeatureRadiusOffset(phase, features)
+      const radius = Math.max(
+        baseRadius * 0.54,
         baseRadius +
-        Math.sin(sampleAngle * wobbleFrequencyA + wobblePhaseA) * wobbleAmpA +
-        Math.sin(sampleAngle * wobbleFrequencyB + wobblePhaseB) * wobbleAmpB +
-        this.randomRange(-10, 10)
+          Math.sin(sampleAngle * wobbleFrequencyA + wobblePhaseA) * wobbleAmpA +
+          Math.sin(sampleAngle * wobbleFrequencyB + wobblePhaseB) * wobbleAmpB +
+          featureRadiusOffset +
+          this.randomRange(-6, 6)
+      )
 
       controls.push(
         new THREE.Vector3(
@@ -145,8 +162,8 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
       )
     }
 
-    const curve = new THREE.CatmullRomCurve3(controls, true, 'catmullrom', 0.42)
-    const points = curve.getSpacedPoints(539)
+    const curve = new THREE.CatmullRomCurve3(controls, true, 'catmullrom', 0.24)
+    const points = curve.getSpacedPoints(959)
     points.pop()
 
     const centroid = points
@@ -159,6 +176,113 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
     }
 
     return points
+  }
+
+  private buildTrackFeatures(): TrackFeature[] {
+    const baseCenters = [0.16, 0.34, 0.52, 0.68, 0.84]
+    const jitter = () => this.randomRange(-0.035, 0.035)
+
+    return [
+      {
+        kind: 'hairpin',
+        center: THREE.MathUtils.euclideanModulo(baseCenters[0] + jitter(), 1),
+        width: this.randomRange(0.045, 0.062),
+        strength: this.randomRange(120, 165),
+        sign: Math.random() > 0.5 ? 1 : -1,
+      },
+      {
+        kind: 'chicane',
+        center: THREE.MathUtils.euclideanModulo(baseCenters[1] + jitter(), 1),
+        width: this.randomRange(0.055, 0.075),
+        strength: this.randomRange(44, 68),
+        sign: Math.random() > 0.5 ? 1 : -1,
+      },
+      {
+        kind: 'doubleApex',
+        center: THREE.MathUtils.euclideanModulo(baseCenters[2] + jitter(), 1),
+        width: this.randomRange(0.085, 0.12),
+        strength: this.randomRange(58, 86),
+        sign: Math.random() > 0.5 ? 1 : -1,
+      },
+      {
+        kind: 'banking',
+        center: THREE.MathUtils.euclideanModulo(baseCenters[3] + jitter(), 1),
+        width: this.randomRange(0.085, 0.13),
+        strength: this.randomRange(48, 72),
+        sign: Math.random() > 0.5 ? 1 : -1,
+      },
+      {
+        kind: 'sCurves',
+        center: THREE.MathUtils.euclideanModulo(baseCenters[4] + jitter(), 1),
+        width: this.randomRange(0.09, 0.13),
+        strength: this.randomRange(44, 66),
+        sign: Math.random() > 0.5 ? 1 : -1,
+      },
+    ]
+  }
+
+  private getFeatureRadiusOffset(phase: number, features: TrackFeature[]): number {
+    return features.reduce((offset, feature) => {
+      const local = this.normalizedFeatureDistance(phase, feature.center, feature.width)
+      const envelope = Math.exp(-local * local * 2.3)
+
+      if (Math.abs(local) > 1.7) return offset
+
+      switch (feature.kind) {
+        case 'hairpin':
+          return offset - feature.strength * envelope
+        case 'chicane':
+          return (
+            offset +
+            feature.sign * feature.strength * Math.sin(local * Math.PI * 2.1) * envelope
+          )
+        case 'doubleApex': {
+          const apexA = Math.exp(-Math.pow(local + 0.55, 2) * 8)
+          const apexB = Math.exp(-Math.pow(local - 0.55, 2) * 8)
+          const middleRelease = Math.exp(-local * local * 12)
+          return offset + feature.sign * feature.strength * (apexA + apexB - middleRelease * 0.48)
+        }
+        case 'banking':
+          return offset + feature.sign * feature.strength * envelope
+        case 'sCurves':
+          return offset + feature.sign * feature.strength * Math.sin(local * Math.PI * 3) * envelope
+      }
+
+      return offset
+    }, 0)
+  }
+
+  private getFeatureAngleOffset(phase: number, features: TrackFeature[]): number {
+    return features.reduce((offset, feature) => {
+      const local = this.normalizedFeatureDistance(phase, feature.center, feature.width)
+      const envelope = Math.exp(-local * local * 2.8)
+
+      if (Math.abs(local) > 1.7) return offset
+
+      switch (feature.kind) {
+        case 'hairpin':
+          return offset + feature.sign * 0.18 * Math.sin(local * Math.PI) * envelope
+        case 'chicane':
+          return offset + feature.sign * 0.055 * Math.sin(local * Math.PI * 2) * envelope
+        case 'doubleApex':
+          return offset + feature.sign * 0.045 * Math.sin(local * Math.PI * 0.9) * envelope
+        case 'banking':
+          return offset + feature.sign * 0.035 * Math.sin(local * Math.PI * 0.7) * envelope
+        case 'sCurves':
+          return offset + feature.sign * 0.065 * Math.sin(local * Math.PI * 3) * envelope
+      }
+
+      return offset
+    }, 0)
+  }
+
+  private normalizedFeatureDistance(phase: number, center: number, width: number): number {
+    const delta = Math.atan2(
+      Math.sin((phase - center) * Math.PI * 2),
+      Math.cos((phase - center) * Math.PI * 2)
+    ) / (Math.PI * 2)
+
+    return delta / width
   }
 
   private analyzeTurns(points: THREE.Vector3[]): TurnSummary {

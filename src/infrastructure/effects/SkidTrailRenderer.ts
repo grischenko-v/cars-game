@@ -26,10 +26,12 @@ export class SkidTrailRenderer {
     const material = new THREE.LineBasicMaterial({
       color: 0x1b1b1b,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.72,
+      depthWrite: false,
     })
 
     this.lines = new THREE.LineSegments(this.geometry, material)
+    this.lines.renderOrder = 11
     scene.add(this.lines)
   }
 
@@ -43,8 +45,9 @@ export class SkidTrailRenderer {
     if (!car) return
 
     const shouldSkid =
-      (keys.brake && Math.abs(carAggregate.speed) > 7 && Math.abs(carAggregate.steer) > 0.12) ||
-      carAggregate.driftAmount > 2.2
+      (keys.brake && Math.abs(carAggregate.speed) > 7) ||
+      (keys.backward && carAggregate.speed > 10) ||
+      carAggregate.driftAmount > 1.35
 
     if (!shouldSkid) {
       this.reset()
@@ -74,8 +77,8 @@ export class SkidTrailRenderer {
       terrain.getHeightAndNormal(rightMark.x, rightMark.z)
     )
 
-    leftMark.y = leftSurface.height + 0.025
-    rightMark.y = rightSurface.height + 0.025
+    leftMark.y = leftSurface.height + 0.085
+    rightMark.y = rightSurface.height + 0.085
 
     if (this.lastLeftMark && this.lastRightMark) {
       this.addSegment(this.lastLeftMark, leftMark)

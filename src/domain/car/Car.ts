@@ -15,7 +15,7 @@ export interface CarMotionSnapshot {
 }
 
 export class Car {
-  private static readonly gearSpeedLimits = [0, 8, 15, 23, 31, 38]
+  private static readonly gearSpeedLimits = [0, 6, 11, 17, 23, 29, 34, 38]
   private static readonly redlineRpm = 7200
   private static readonly idleRpm = 900
   private static readonly shiftDuration = 0.34

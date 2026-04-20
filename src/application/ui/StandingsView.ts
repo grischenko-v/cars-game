@@ -148,19 +148,34 @@ export class StandingsView {
           ]
         ),
         this.renderLapTimes(),
-        this.state.finished
-          ? h(
-              'div',
-              {
-                style: {
-                  marginTop: '6px',
-                  color: '#f3e7a4',
-                  fontWeight: '700',
-                },
-              },
-              'Enter / R - рестарт'
-            )
-          : null,
+        this.state.finished ? this.renderFinishSummary() : null,
+      ]
+    )
+  }
+
+  private renderFinishSummary() {
+    const player = this.state.entries.find((entry) => entry.isPlayer)
+    const bestLap = this.state.lapTimes.length > 0
+      ? Math.min(...this.state.lapTimes)
+      : 0
+
+    return h(
+      'div',
+      {
+        style: {
+          marginTop: '8px',
+          paddingTop: '8px',
+          borderTop: '1px solid rgba(255,255,255,0.12)',
+          color: '#f3e7a4',
+          fontWeight: '700',
+          lineHeight: '1.45',
+        },
+      },
+      [
+        h('div', `Ваше место: ${player ? player.place : '-'}`),
+        h('div', `Всего: ${this.formatTime(this.state.elapsedTime)}`),
+        h('div', `Лучший круг: ${bestLap > 0 ? this.formatTime(bestLap) : '-'}`),
+        h('div', { style: { marginTop: '5px' } }, 'Enter / R - рестарт'),
       ]
     )
   }

@@ -10,7 +10,7 @@ export class CarShadow {
       new THREE.MeshBasicMaterial({
         map: this.createShadowTexture(),
         transparent: true,
-        opacity: 0.82,
+        opacity: 0.9,
         depthWrite: false,
         polygonOffset: true,
         polygonOffsetFactor: -3,
@@ -25,7 +25,7 @@ export class CarShadow {
   update(position: THREE.Vector3, groundHeight: number, heading: number, speed: number): void {
     const speedStretch = 1 + clamp(Math.abs(speed) / 70, 0, 0.18)
 
-    this.mesh.position.set(position.x, groundHeight + 0.045, position.z)
+    this.mesh.position.set(position.x, groundHeight + 0.09, position.z)
     this.mesh.rotation.z = -heading
     this.mesh.scale.set(speedStretch, 1, 1)
   }

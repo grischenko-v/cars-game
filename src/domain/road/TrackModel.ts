@@ -22,6 +22,7 @@ export interface RoadBandData {
   tangent: THREE.Vector3
   nearestPoint: THREE.Vector3
   distanceAlong: number
+  lateralOffset: number
   radius: number
   innerRadius: number
   outerRadius: number
@@ -56,6 +57,13 @@ export interface TrackLayoutSnapshot {
 }
 
 export class TrackModel {
+  private readonly laneSectionLength = 280
+  private readonly laneTransitionLength = 92
+  private readonly startTwoLaneLeadIn = 160
+  private readonly lanePattern = [2, 3, 1, 4, 2, 5, 3, 6, 2, 4]
+  private readonly laneWidth = 4.2
+  private readonly roadEdgePadding = 3
+
   readonly roadWidth: number
   readonly shoulderWidth: number
   readonly roadY: number
@@ -78,6 +86,7 @@ export class TrackModel {
   readonly cumulativeLengths: number[]
   readonly totalLength: number
   readonly trackBounds: TrackBounds
+  private readonly up = new THREE.Vector3(0, 1, 0)
 
   constructor(snapshot: TrackLayoutSnapshot) {
     this.roadWidth = snapshot.roadWidth
@@ -179,9 +188,14 @@ export class TrackModel {
       segmentStart.distanceTo(segmentEnd) * bestSegmentT
     const phase = this.totalLength > 0 ? distanceAlong / this.totalLength : 0
 
+    const lateralOffset = new THREE.Vector3(x - bestX, 0, z - bestZ).dot(
+      new THREE.Vector3(-tangent.z, 0, tangent.x)
+    )
+
     return {
       point: new THREE.Vector3(bestX, this.roadY, bestZ),
       distance: Math.sqrt(bestDistanceSq),
+      lateralOffset,
       tangent,
       distanceAlong,
       angle: phase * Math.PI * 2,
@@ -241,18 +255,20 @@ export class TrackModel {
 
   getBandData(x: number, z: number): RoadBandData {
     const closest = this.getClosestPointData(x, z)
+    const halfWidth = this.getTrackHalfWidthAtDistance(closest.distanceAlong)
 
     return {
       angle: closest.angle,
       centerRadius: 0,
-      halfWidth: this.trackHalfWidth,
+      halfWidth,
       distFromRoadCenter: closest.distance,
       tangent: closest.tangent,
       nearestPoint: closest.point,
       distanceAlong: closest.distanceAlong,
+      lateralOffset: closest.lateralOffset,
       radius: closest.distance,
       innerRadius: 0,
-      outerRadius: this.trackHalfWidth,
+      outerRadius: halfWidth,
     }
   }
 
@@ -265,7 +281,87 @@ export class TrackModel {
   }
 
   isPointOnRoad(x: number, z: number, margin = 0): boolean {
-    return this.getBandData(x, z).distFromRoadCenter <= this.trackHalfWidth + margin
+    const roadBand = this.getBandData(x, z)
+
+    return roadBand.distFromRoadCenter <= roadBand.halfWidth + margin
+  }
+
+  getLaneCountAtDistance(distance: number): number {
+    const loopDistance = this.getLanePatternDistance(distance)
+    const section = Math.floor(loopDistance / this.laneSectionLength)
+
+    return this.lanePattern[section % this.lanePattern.length]
+  }
+
+  getEffectiveLaneCountAtDistance(distance: number): number {
+    const laneCountByWidth = Math.round(
+      (this.getTrackHalfWidthAtDistance(distance) * 2 - this.roadEdgePadding) /
+        this.laneWidth
+    )
+
+    return THREE.MathUtils.clamp(laneCountByWidth, 1, 6)
+  }
+
+  getTrackHalfWidthAtDistance(distance: number): number {
+    const loopDistance = this.getLanePatternDistance(distance)
+    const localDistance = THREE.MathUtils.euclideanModulo(
+      loopDistance,
+      this.laneSectionLength
+    )
+    const currentWidth = this.getRawTrackHalfWidthAtDistance(loopDistance)
+
+    if (localDistance < this.laneTransitionLength) {
+      const previousWidth = this.getRawTrackHalfWidthAtDistance(
+        loopDistance - localDistance - 0.01
+      )
+      const t = THREE.MathUtils.smoothstep(
+        localDistance / this.laneTransitionLength,
+        0,
+        1
+      )
+
+      return THREE.MathUtils.lerp(previousWidth, currentWidth, t)
+    }
+
+    if (localDistance > this.laneSectionLength - this.laneTransitionLength) {
+      const nextWidth = this.getRawTrackHalfWidthAtDistance(
+        loopDistance + this.laneTransitionLength
+      )
+      const t = THREE.MathUtils.smoothstep(
+        (localDistance - (this.laneSectionLength - this.laneTransitionLength)) /
+          this.laneTransitionLength,
+        0,
+        1
+      )
+
+      return THREE.MathUtils.lerp(currentWidth, nextWidth, t)
+    }
+
+    return currentWidth
+  }
+
+  private getRawTrackHalfWidthAtDistance(distance: number): number {
+    const laneCount = this.getLaneCountAtDistance(distance)
+    const dynamicWidth = laneCount * this.laneWidth + this.roadEdgePadding
+
+    return Math.min(this.trackHalfWidth, dynamicWidth * 0.5)
+  }
+
+  getOuterHalfWidthAtDistance(distance: number): number {
+    return this.getTrackHalfWidthAtDistance(distance) + this.shoulderWidth
+  }
+
+  private getLanePatternDistance(distance: number): number {
+    if (this.totalLength <= 0) return Math.max(distance, 0)
+
+    const startDistance =
+      (THREE.MathUtils.euclideanModulo(this.startAngle, Math.PI * 2) / (Math.PI * 2)) *
+      this.totalLength
+
+    return THREE.MathUtils.euclideanModulo(
+      distance - startDistance + this.startTwoLaneLeadIn,
+      this.totalLength
+    )
   }
 
   getHeightAndNormal(
@@ -276,9 +372,15 @@ export class TrackModel {
     const roadBand = this.getBandData(x, z)
 
     if (roadBand.distFromRoadCenter <= roadBand.halfWidth) {
+      const slope = this.getBankSlopeAtDistance(roadBand.distanceAlong)
+
       return {
-        height: this.roadY,
-        normal: new THREE.Vector3(0, 1, 0),
+        height: this.getBankedHeightAtDistance(
+          roadBand.distanceAlong,
+          roadBand.lateralOffset,
+          this.roadY
+        ),
+        normal: this.getBankedNormalAtDistance(roadBand.distanceAlong, slope),
         onRoad: true,
       }
     }
@@ -286,10 +388,17 @@ export class TrackModel {
     if (roadBand.distFromRoadCenter <= roadBand.halfWidth + this.shoulderBlend) {
       const t = (roadBand.distFromRoadCenter - roadBand.halfWidth) / this.shoulderBlend
       const k = THREE.MathUtils.smoothstep(t, 0, 1)
+      const edgeOffset = Math.sign(roadBand.lateralOffset || 1) * roadBand.halfWidth
+      const edgeHeight = this.getBankedHeightAtDistance(
+        roadBand.distanceAlong,
+        edgeOffset,
+        this.roadY
+      )
+      const edgeNormal = this.getBankedNormalAtDistance(roadBand.distanceAlong)
 
       return {
-        height: THREE.MathUtils.lerp(this.roadY, terrainData.height, k),
-        normal: new THREE.Vector3(0, 1, 0).lerp(terrainData.normal, k).normalize(),
+        height: THREE.MathUtils.lerp(edgeHeight, terrainData.height, k),
+        normal: edgeNormal.lerp(terrainData.normal, k).normalize(),
         onRoad: false,
       }
     }
@@ -299,5 +408,40 @@ export class TrackModel {
       normal: terrainData.normal,
       onRoad: false,
     }
+  }
+
+  getBankedHeightAtDistance(distance: number, lateralOffset: number, baseY: number): number {
+    return baseY + lateralOffset * this.getBankSlopeAtDistance(distance)
+  }
+
+  getBankedNormalAtDistance(
+    distance: number,
+    slope = this.getBankSlopeAtDistance(distance)
+  ): THREE.Vector3 {
+    const tangent = new THREE.Vector3()
+    this.sampleCenterlineByDistance(distance, new THREE.Vector3(), tangent)
+    const side = new THREE.Vector3(-tangent.z, 0, tangent.x)
+
+    return this.up.clone().addScaledVector(side, -slope).normalize()
+  }
+
+  getBankSlopeAtDistance(distance: number): number {
+    const signedCurve = this.getSignedCurveAtDistance(distance)
+    const normalizedCurve = THREE.MathUtils.clamp(signedCurve / 0.5, -1, 1)
+
+    return -normalizedCurve * 0.13
+  }
+
+  private getSignedCurveAtDistance(distance: number): number {
+    const tangentA = new THREE.Vector3()
+    const tangentB = new THREE.Vector3()
+
+    this.sampleCenterlineByDistance(distance - 32, new THREE.Vector3(), tangentA)
+    this.sampleCenterlineByDistance(distance + 32, new THREE.Vector3(), tangentB)
+
+    const turnSign = tangentA.x * tangentB.z - tangentA.z * tangentB.x
+    const tangentDot = THREE.MathUtils.clamp(tangentA.dot(tangentB), -1, 1)
+
+    return Math.atan2(turnSign, tangentDot)
   }
 }

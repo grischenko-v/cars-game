@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clamp, expLerpFactor } from './utils/math'
 import { Car as CarAggregate } from './domain/car/Car'
 import { Race } from './domain/race/Race'
-import type { RoadSurfaceData } from './domain/road/TrackModel'
+import type { RoadBandData, RoadSurfaceData } from './domain/road/TrackModel'
 import { KeyboardInput } from './application/input/KeyboardInput'
 import { FollowCameraController } from './application/camera/FollowCameraController'
 import { OpponentDriver } from './application/ai/OpponentDriver'
@@ -80,7 +80,7 @@ const GRIP_HANDBRAKE = 4.8
 const HEIGHT_SMOOTHNESS = 10
 const TILT_SMOOTHNESS = 8
 const CAR_COLLIDER_RADIUS = 1.05
-const COMPETITOR_COLLIDER_RADIUS = 1.8
+const COMPETITOR_COLLIDER_RADIUS = 1.55
 const CAR_GROUND_CLEARANCE = 0.05
 const LATERAL_GRIP_ROAD = 8.6
 const LATERAL_GRIP_OFFROAD = 3.6
@@ -89,19 +89,20 @@ const YAW_RESPONSE_OFFROAD = 3.0
 const YAW_DAMPING = 3.0
 const DRIFT_SLIP_ASSIST = 1.15
 const DRIFT_RECOVERY = 5.0
-const BODY_ROLL_AMOUNT = 0.13
+const BODY_ROLL_AMOUNT = 0.24
 const HUD_SPEED_MULTIPLIER = 5.4
-const SHOULDER_SPEED_DRAG = 7.5
-const APRON_SPEED_DRAG = 11.5
-const GRASS_SPEED_DRAG = 18.5
+const GRASS_SPEED_FACTOR = 0.75
+const SAND_SPEED_FACTOR = 0.65
 const SHOULDER_VELOCITY_DAMP = 0.985
 const APRON_VELOCITY_DAMP = 0.975
-const GRASS_VELOCITY_DAMP = 0.955
+const GRASS_VELOCITY_DAMP = 0.985
 const COUNTDOWN_SECONDS = 3
 const COUNTDOWN_GO_HOLD_SECONDS = 0.65
-const PLAYER_START_GRID_OFFSET = -30.7
+const PLAYER_START_GRID_OFFSET = -48.3
 const OPPONENT_START_GRID_OFFSET = -5.1
-const OPPONENT_LATERAL_OFFSET_FACTOR = 0.24
+const START_GRID_ROW_SPACING = 7.2
+const OPPONENT_LATERAL_OFFSET_FACTOR = 0.42
+const OPPONENT_RAIL_HALF_WIDTH_FACTOR = 0.64
 
 type GamePhase = 'loading' | 'countdown' | 'running' | 'finished'
 
@@ -122,6 +123,7 @@ interface DriveControls {
   brake: boolean
   canDrive: boolean
   maxForwardSpeed: number
+  accelerationFactor?: number
   extraRideHeight: number
 }
 
@@ -150,6 +152,8 @@ const standingEntries: StandingEntry[] = []
 const usedNames = new Set<string>()
 const playerName = nameGenerator.nextName(usedNames)
 const STANDINGS_UPDATE_INTERVAL = 0.12
+const SURFACE_CACHE_SCALE = 4
+const SURFACE_CACHE_LIMIT = 12000
 let standingsUpdateTimer = 0
 let hasRankedCompetition = false
 
@@ -213,7 +217,11 @@ loader.load(
     carLocalMinZ = localBox.min.z
     carLocalMaxZ = localBox.max.z
 
-    placeCarOnStartGrid(carView, PLAYER_START_GRID_OFFSET, 0)
+    placeCarOnStartGrid(
+      carView,
+      PLAYER_START_GRID_OFFSET,
+      -road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR
+    )
     snapCarToSurface(carView)
 
     carAggregate.setHeading(carView.getYaw())
@@ -288,61 +296,67 @@ function createOpponents(sourceView: CarView): void {
   const opponentSettings = [
     {
       id: 'opponent-1',
-      speedFactor: 1,
+      speedFactor: 0.95,
+      accelerationFactor: 0.98,
       aggression: 0.94,
       lineBias: -0.45,
       distanceOffset: OPPONENT_START_GRID_OFFSET,
-      lateralOffset: -road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
+      lateralOffset: -road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0xb9413f,
       minimapColor: '#e05249',
     },
     {
       id: 'opponent-2',
-      speedFactor: 0.98,
+      speedFactor: 0.92,
+      accelerationFactor: 0.96,
       aggression: 0.88,
       lineBias: 0.4,
-      distanceOffset: OPPONENT_START_GRID_OFFSET,
-      lateralOffset: road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING,
+      lateralOffset: road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0x2f78c4,
       minimapColor: '#4e9dff',
     },
     {
       id: 'opponent-3',
-      speedFactor: 0.97,
+      speedFactor: 0.89,
+      accelerationFactor: 0.94,
       aggression: 0.82,
       lineBias: -0.1,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - 6.4,
-      lateralOffset: 0,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 2,
+      lateralOffset: -road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0xe5b84a,
       minimapColor: '#f3d45a',
     },
     {
       id: 'opponent-4',
-      speedFactor: 0.95,
+      speedFactor: 0.86,
+      accelerationFactor: 0.92,
       aggression: 0.76,
       lineBias: 0.55,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - 12.8,
-      lateralOffset: road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 3,
+      lateralOffset: road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0x5fbf78,
       minimapColor: '#7bd88f',
     },
     {
       id: 'opponent-5',
-      speedFactor: 0.93,
+      speedFactor: 0.83,
+      accelerationFactor: 0.9,
       aggression: 0.8,
       lineBias: -0.55,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - 12.8,
-      lateralOffset: -road.roadWidth * OPPONENT_LATERAL_OFFSET_FACTOR,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 4,
+      lateralOffset: -road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0xb66ce0,
       minimapColor: '#c58cff',
     },
     {
       id: 'opponent-6',
-      speedFactor: 0.92,
+      speedFactor: 0.8,
+      accelerationFactor: 0.88,
       aggression: 0.72,
       lineBias: 0.08,
-      distanceOffset: OPPONENT_START_GRID_OFFSET - 19.2,
-      lateralOffset: 0,
+      distanceOffset: OPPONENT_START_GRID_OFFSET - START_GRID_ROW_SPACING * 5,
+      lateralOffset: road.getTrackHalfWidthAtDistance(0) * OPPONENT_LATERAL_OFFSET_FACTOR,
       tint: 0xf08a52,
       minimapColor: '#ff9f6e',
     },
@@ -371,6 +385,7 @@ function createOpponents(sourceView: CarView): void {
         maxSpeed: MAX_FORWARD_SPEED,
         maxSteer: MAX_STEER,
         speedFactor: settings.speedFactor,
+        accelerationFactor: settings.accelerationFactor,
         aggression: settings.aggression,
         lineBias: settings.lineBias,
       }),
@@ -388,9 +403,16 @@ function placeCarOnStartGrid(
     (THREE.MathUtils.euclideanModulo(road.startAngle, Math.PI * 2) / (Math.PI * 2)) *
     road.totalLength
 
-  road.sampleCenterlineByDistance(startDistance + distanceOffset, tmpCarPosition, tmpVecA)
+  const gridDistance = startDistance + distanceOffset
+  const safeLateralOffset = clamp(
+    lateralOffset,
+    -road.getTrackHalfWidthAtDistance(gridDistance) * 0.78,
+    road.getTrackHalfWidthAtDistance(gridDistance) * 0.78
+  )
+
+  road.sampleCenterlineByDistance(gridDistance, tmpCarPosition, tmpVecA)
   tmpVecB.set(-tmpVecA.z, 0, tmpVecA.x).normalize()
-  tmpCarPosition.addScaledVector(tmpVecB, lateralOffset)
+  tmpCarPosition.addScaledVector(tmpVecB, safeLateralOffset)
   view.setPosition(tmpCarPosition)
   view.setYaw(Math.atan2(tmpVecA.x, tmpVecA.z))
 }
@@ -490,16 +512,45 @@ function resolveObstacleCollisionsFor(view: CarView, car: CarAggregate): void {
 }
 
 function getSurfaceAt(x: number, z: number) {
-  const key = `${x.toFixed(2)}:${z.toFixed(2)}`
+  const key = `${Math.round(x * SURFACE_CACHE_SCALE)}:${Math.round(z * SURFACE_CACHE_SCALE)}`
   const cached = surfaceCache.get(key)
 
   if (cached) {
     return cached
   }
 
+  if (surfaceCache.size > SURFACE_CACHE_LIMIT) {
+    surfaceCache.clear()
+  }
+
   const surface = road.getHeightAndNormal(x, z, terrain.getHeightAndNormal(x, z))
   surfaceCache.set(key, surface)
   return surface
+}
+
+function getSurfaceSpeedFactor(x: number, z: number, roadBand: RoadBandData): number {
+  if (roadBand.distFromRoadCenter <= roadBand.halfWidth) {
+    return 1
+  }
+
+  return decorations.getGroundSurfaceAt(x, z) === 'sand'
+    ? SAND_SPEED_FACTOR
+    : GRASS_SPEED_FACTOR
+}
+
+function limitSpeedBySurface(
+  car: CarAggregate,
+  maxForwardSpeed: number,
+  surfaceSpeedFactor: number,
+  delta: number
+): void {
+  const surfaceMaxSpeed = maxForwardSpeed * surfaceSpeedFactor
+
+  if (car.speed > surfaceMaxSpeed) {
+    car.moveSpeedTowardZero((8 + (car.speed - surfaceMaxSpeed) * 3.4) * delta)
+  }
+
+  car.clampSpeed(-MAX_REVERSE_SPEED * surfaceSpeedFactor, surfaceMaxSpeed)
 }
 
 function applyDrivePhysics(
@@ -511,13 +562,21 @@ function applyDrivePhysics(
   const carPosition = view.copyPosition(tmpCarPosition)
   const roadBand = road.getBandData(carPosition.x, carPosition.z)
   const currentSurface = getSurfaceAt(carPosition.x, carPosition.z)
+  const surfaceSpeedFactor = getSurfaceSpeedFactor(carPosition.x, carPosition.z, roadBand)
   const absSpeed = car.absSpeed
   const speedRatio = clamp(absSpeed, 0, controls.maxForwardSpeed) / controls.maxForwardSpeed
   const accelCurve = 1 - Math.pow(speedRatio, 1.8)
   car.updateTransmission(delta, controls.maxForwardSpeed, controls.canDrive ? controls.throttle : 0)
 
   if (controls.canDrive && controls.throttle > 0) {
-    car.accelerate(BASE_ACCEL * controls.throttle * accelCurve * car.shiftAccelerationFactor * delta)
+    car.accelerate(
+      BASE_ACCEL *
+        (controls.accelerationFactor ?? 1) *
+        controls.throttle *
+        accelCurve *
+        car.shiftAccelerationFactor *
+        delta
+    )
   }
 
   if (controls.canDrive && controls.throttle < 0) {
@@ -536,23 +595,20 @@ function applyDrivePhysics(
     car.moveSpeedTowardZero(HANDBRAKE_DRAG * delta)
   }
 
-  const shoulderLimit = road.trackHalfWidth + road.shoulderWidth
+  const shoulderLimit = roadBand.halfWidth + road.shoulderWidth
   const apronLimit = shoulderLimit + road.apronWidth
 
-  if (roadBand.distFromRoadCenter > road.trackHalfWidth) {
+  if (roadBand.distFromRoadCenter > roadBand.halfWidth) {
     if (roadBand.distFromRoadCenter <= shoulderLimit) {
-      car.moveSpeedTowardZero(SHOULDER_SPEED_DRAG * delta)
       car.dampenVelocity(Math.pow(SHOULDER_VELOCITY_DAMP, delta * 60))
     } else if (roadBand.distFromRoadCenter <= apronLimit) {
-      car.moveSpeedTowardZero(APRON_SPEED_DRAG * delta)
       car.dampenVelocity(Math.pow(APRON_VELOCITY_DAMP, delta * 60))
     } else {
-      car.moveSpeedTowardZero(GRASS_SPEED_DRAG * delta)
       car.dampenVelocity(Math.pow(GRASS_VELOCITY_DAMP, delta * 60))
     }
   }
 
-  car.clampSpeed(-MAX_REVERSE_SPEED, controls.maxForwardSpeed)
+  limitSpeedBySurface(car, controls.maxForwardSpeed, surfaceSpeedFactor, delta)
 
   const maxSteerAtSpeed = THREE.MathUtils.lerp(MAX_STEER, MAX_STEER * 0.42, speedRatio)
   const steerTarget = controls.canDrive ? controls.steer * maxSteerAtSpeed : 0
@@ -629,10 +685,14 @@ function applyDrivePhysics(
   tmpMatrix.makeBasis(tmpRight, surface.normal, tmpVecA)
   tmpQuat.setFromRotationMatrix(tmpMatrix)
   const rollStrength = clamp(Math.abs(forwardSpeed) / 18, 0, 1)
+  const dynamicRoll =
+    -car.steer * 0.74 -
+    car.yawVelocity * 0.18 -
+    lateralSpeed * 0.018
   const bodyRollTarget =
-    clamp(-car.steer * rollStrength * BODY_ROLL_AMOUNT, -BODY_ROLL_AMOUNT, BODY_ROLL_AMOUNT) *
+    clamp(dynamicRoll * rollStrength * BODY_ROLL_AMOUNT, -BODY_ROLL_AMOUNT, BODY_ROLL_AMOUNT) *
     (surface.onRoad ? 1 : 0.6)
-  car.rollToward(bodyRollTarget, expLerpFactor(5.5, delta))
+  car.rollToward(bodyRollTarget, expLerpFactor(7.2, delta))
   tmpQuatC.setFromAxisAngle(tmpPitchAxis, -car.shiftKickAmount * 0.055)
   tmpQuat.multiply(tmpQuatC)
   tmpQuatB.setFromAxisAngle(tmpRollAxis, car.bodyRoll)
@@ -647,6 +707,7 @@ function updateDrive(delta: number): void {
   const carPosition = carView.copyPosition(tmpCarPosition)
   const roadBand = road.getBandData(carPosition.x, carPosition.z)
   const currentSurface = getSurfaceAt(carPosition.x, carPosition.z)
+  const surfaceSpeedFactor = getSurfaceSpeedFactor(carPosition.x, carPosition.z, roadBand)
   const absSpeed = carAggregate.absSpeed
   const speedRatio = clamp(absSpeed, 0, MAX_FORWARD_SPEED) / MAX_FORWARD_SPEED
 
@@ -682,23 +743,20 @@ function updateDrive(delta: number): void {
     carAggregate.moveSpeedTowardZero(HANDBRAKE_DRAG * delta)
   }
 
-  const shoulderLimit = road.trackHalfWidth + road.shoulderWidth
+  const shoulderLimit = roadBand.halfWidth + road.shoulderWidth
   const apronLimit = shoulderLimit + road.apronWidth
 
-  if (roadBand.distFromRoadCenter > road.trackHalfWidth) {
+  if (roadBand.distFromRoadCenter > roadBand.halfWidth) {
     if (roadBand.distFromRoadCenter <= shoulderLimit) {
-      carAggregate.moveSpeedTowardZero(SHOULDER_SPEED_DRAG * delta)
       carAggregate.dampenVelocity(Math.pow(SHOULDER_VELOCITY_DAMP, delta * 60))
     } else if (roadBand.distFromRoadCenter <= apronLimit) {
-      carAggregate.moveSpeedTowardZero(APRON_SPEED_DRAG * delta)
       carAggregate.dampenVelocity(Math.pow(APRON_VELOCITY_DAMP, delta * 60))
     } else {
-      carAggregate.moveSpeedTowardZero(GRASS_SPEED_DRAG * delta)
       carAggregate.dampenVelocity(Math.pow(GRASS_VELOCITY_DAMP, delta * 60))
     }
   }
 
-  carAggregate.clampSpeed(-MAX_REVERSE_SPEED, MAX_FORWARD_SPEED)
+  limitSpeedBySurface(carAggregate, MAX_FORWARD_SPEED, surfaceSpeedFactor, delta)
 
   const maxSteerAtSpeed = THREE.MathUtils.lerp(MAX_STEER, MAX_STEER * 0.42, speedRatio)
   let steerTarget = 0
@@ -783,10 +841,14 @@ function updateDrive(delta: number): void {
   tmpMatrix.makeBasis(tmpRight, surface.normal, tmpVecA)
   tmpQuat.setFromRotationMatrix(tmpMatrix)
   const rollStrength = clamp(Math.abs(forwardSpeed) / 18, 0, 1)
+  const dynamicRoll =
+    -carAggregate.steer * 0.74 -
+    carAggregate.yawVelocity * 0.18 -
+    lateralSpeed * 0.018
   const bodyRollTarget =
-    clamp(-carAggregate.steer * rollStrength * BODY_ROLL_AMOUNT, -BODY_ROLL_AMOUNT, BODY_ROLL_AMOUNT) *
+    clamp(dynamicRoll * rollStrength * BODY_ROLL_AMOUNT, -BODY_ROLL_AMOUNT, BODY_ROLL_AMOUNT) *
     (surface.onRoad ? 1 : 0.6)
-  carAggregate.rollToward(bodyRollTarget, expLerpFactor(5.5, delta))
+  carAggregate.rollToward(bodyRollTarget, expLerpFactor(7.2, delta))
   tmpQuatC.setFromAxisAngle(tmpPitchAxis, -carAggregate.shiftKickAmount * 0.055)
   tmpQuat.multiply(tmpQuatC)
   tmpQuatB.setFromAxisAngle(tmpRollAxis, carAggregate.bodyRoll)
@@ -800,7 +862,7 @@ function updateDrive(delta: number): void {
 
   const currentRoadBand = road.getBandData(tmpCarPosition.x, tmpCarPosition.z)
   const isCloseEnoughToTrack =
-    currentRoadBand.distFromRoadCenter <= road.trackHalfWidth + road.shoulderWidth
+    currentRoadBand.distFromRoadCenter <= currentRoadBand.halfWidth + road.shoulderWidth
   const updatedRaceSnapshot = gamePhase === 'running' && isCloseEnoughToTrack
     ? race.update(
         delta,
@@ -845,11 +907,13 @@ function updateOpponents(delta: number): void {
         brake: controls.brake,
         canDrive: opponentCanDrive,
         maxForwardSpeed: MAX_FORWARD_SPEED * controls.speedFactor,
+        accelerationFactor: controls.accelerationFactor,
         extraRideHeight: OPPONENT_RIDE_HEIGHT_EXTRA,
       },
       delta
     )
 
+    applyOpponentRailConstraint(competitor.view, competitor.car, delta)
     snapCarToSurface(competitor.view, OPPONENT_RIDE_HEIGHT_EXTRA)
     competitor.view.copyPosition(tmpCarPosition)
 
@@ -857,7 +921,7 @@ function updateOpponents(delta: number): void {
 
     if (
       canDrive &&
-      roadBand.distFromRoadCenter <= road.trackHalfWidth + road.shoulderWidth
+      roadBand.distFromRoadCenter <= roadBand.halfWidth + road.shoulderWidth
     ) {
       competitor.race.update(
         delta,
@@ -868,30 +932,116 @@ function updateOpponents(delta: number): void {
   }
 }
 
+function applyOpponentRailConstraint(
+  view: CarView,
+  car: CarAggregate,
+  delta: number
+): void {
+  const position = view.copyPosition(tmpCarPosition)
+  const roadBand = road.getBandData(position.x, position.z)
+  const safeHalfWidth = roadBand.halfWidth * OPPONENT_RAIL_HALF_WIDTH_FACTOR
+  const clampedLateralOffset = clamp(roadBand.lateralOffset, -safeHalfWidth, safeHalfWidth)
+
+  tmpRight.set(-roadBand.tangent.z, 0, roadBand.tangent.x).normalize()
+  tmpVecA
+    .copy(roadBand.nearestPoint)
+    .addScaledVector(tmpRight, clampedLateralOffset)
+  tmpVecA.y = position.y
+
+  const isOutsideRail = Math.abs(roadBand.lateralOffset) > safeHalfWidth
+  const isOffAsphalt = roadBand.distFromRoadCenter > roadBand.halfWidth
+  const railFactor = isOffAsphalt
+    ? 1
+    : isOutsideRail
+      ? expLerpFactor(18, delta)
+      : expLerpFactor(6, delta)
+
+  position.lerp(tmpVecA, railFactor)
+  view.setPosition(position)
+
+  const targetHeading = Math.atan2(roadBand.tangent.x, roadBand.tangent.z)
+  const headingError =
+    THREE.MathUtils.euclideanModulo(targetHeading - car.heading + Math.PI, Math.PI * 2) -
+    Math.PI
+  const headingFactor = isOffAsphalt ? 1 : expLerpFactor(8, delta)
+  car.setHeading(car.heading + headingError * headingFactor)
+  car.yawVelocity *= isOffAsphalt ? 0.15 : 0.55
+
+  const forwardSpeed = Math.max(
+    car.speed,
+    car.velocity.dot(roadBand.tangent),
+    car.velocity.length() * 0.75,
+    0
+  )
+  car.speed = forwardSpeed
+  car.velocity.copy(roadBand.tangent).multiplyScalar(forwardSpeed)
+}
+
+function resolveCarCarImpact(
+  first: Competitor,
+  second: Competitor,
+  nx: number,
+  nz: number,
+  overlap: number
+): void {
+  tmpVecC.set(nx, 0, nz)
+  tmpVecE.copy(first.car.velocity).sub(second.car.velocity)
+
+  const closingSpeed = tmpVecE.dot(tmpVecC)
+  const bothAi = !first.isPlayer && !second.isPlayer
+  const impulse = closingSpeed < 0 ? -closingSpeed * 0.72 + overlap * 0.42 : overlap * 0.32
+
+  first.car.velocity.addScaledVector(tmpVecC, impulse)
+  second.car.velocity.addScaledVector(tmpVecC, -impulse)
+
+  if (!bothAi) {
+    first.car.moveSpeedTowardZero((0.7 + overlap * 0.9) * (first.isPlayer ? 0.65 : 1))
+    second.car.moveSpeedTowardZero((0.7 + overlap * 0.9) * (second.isPlayer ? 0.65 : 1))
+  }
+}
+
 function resolveCompetitorCollisions(): void {
-  for (let i = 0; i < competitors.length; i++) {
-    for (let j = i + 1; j < competitors.length; j++) {
-      const first = competitors[i]
-      const second = competitors[j]
-      const firstPosition = first.view.copyPosition(tmpVecA)
-      const secondPosition = second.view.copyPosition(tmpVecB)
-      const dx = firstPosition.x - secondPosition.x
-      const dz = firstPosition.z - secondPosition.z
-      const distSq = dx * dx + dz * dz
-      const minDist = COMPETITOR_COLLIDER_RADIUS * 2
+  for (let iteration = 0; iteration < 3; iteration++) {
+    for (let i = 0; i < competitors.length; i++) {
+      for (let j = i + 1; j < competitors.length; j++) {
+        const first = competitors[i]
+        const second = competitors[j]
+        const firstPosition = first.view.copyPosition(tmpVecA)
+        const secondPosition = second.view.copyPosition(tmpVecB)
+        const dx = firstPosition.x - secondPosition.x
+        const dz = firstPosition.z - secondPosition.z
+        const distSq = dx * dx + dz * dz
+        const minDist = COMPETITOR_COLLIDER_RADIUS * 2
 
-      if (distSq >= minDist * minDist) continue
+        if (distSq >= minDist * minDist) continue
 
-      const dist = Math.max(Math.sqrt(distSq), 0.0001)
-      const nx = dx / dist
-      const nz = dz / dist
-      const pushOut = (minDist - dist) * 0.5
+        const dist = Math.max(Math.sqrt(distSq), 0.0001)
+        const nx = dx / dist
+        const nz = dz / dist
+        const overlap = minDist - dist
+        const pushOut = overlap * 0.62 + 0.02
 
-      first.view.translateXZ(nx * pushOut, nz * pushOut)
-      second.view.translateXZ(-nx * pushOut, -nz * pushOut)
+        first.view.translateXZ(nx * pushOut, nz * pushOut)
+        second.view.translateXZ(-nx * pushOut, -nz * pushOut)
 
-      first.car.resolveCollision(tmpVecC.set(nx, 0, nz), 0.95, 0.72)
-      second.car.resolveCollision(tmpVecC.set(-nx, 0, -nz), 0.95, 0.72)
+        resolveCarCarImpact(first, second, nx, nz, overlap)
+
+        if (!first.isPlayer && !second.isPlayer && overlap > 0.45) {
+          const midX = (firstPosition.x + secondPosition.x) * 0.5
+          const midZ = (firstPosition.z + secondPosition.z) * 0.5
+          const roadBand = road.getBandData(midX, midZ)
+          tmpVecE.set(-roadBand.tangent.z, 0, roadBand.tangent.x).normalize()
+
+          const firstSide = i % 2 === 0 ? 1 : -1
+          const sidePush = Math.min(0.42, 0.12 + overlap * 0.18)
+          first.view.translateXZ(tmpVecE.x * sidePush * firstSide, tmpVecE.z * sidePush * firstSide)
+          second.view.translateXZ(
+            -tmpVecE.x * sidePush * firstSide,
+            -tmpVecE.z * sidePush * firstSide
+          )
+          resolveCarCarImpact(first, second, nx, nz, overlap * 1.25)
+        }
+      }
     }
   }
 }
@@ -938,6 +1088,8 @@ function updateCompetitionUi(delta: number): void {
     positionLabelTargets.length = 0
 
     for (const entry of ranked) {
+      if (entry.isPlayer) continue
+
       const competitor = competitorById.get(entry.id)
 
       positionLabelTargets.push({

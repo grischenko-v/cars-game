@@ -7,7 +7,6 @@ export class SpeedLinesOverlay {
   private readonly canvas: HTMLCanvasElement
   private readonly context: CanvasRenderingContext2D
   private intensity = 0
-  private time = 0
   private pixelRatio = 1
   private hasVisibleFrame = false
 
@@ -25,7 +24,7 @@ export class SpeedLinesOverlay {
     this.canvas.style.inset = '0'
     this.canvas.style.pointerEvents = 'none'
     this.canvas.style.zIndex = '3'
-    this.canvas.style.mixBlendMode = 'screen'
+    this.canvas.style.mixBlendMode = 'multiply'
     this.parent.appendChild(this.canvas)
     window.addEventListener('resize', this.handleResize)
     this.resize()
@@ -34,19 +33,30 @@ export class SpeedLinesOverlay {
   update(speed: number, delta: number): void {
     const targetIntensity = THREE.MathUtils.smoothstep(
       clamp(Math.abs(speed) / SPEED_REFERENCE, 0, 1),
-      0.36,
-      1
+      0.24,
+      0.92
     )
     this.intensity = THREE.MathUtils.lerp(
       this.intensity,
       targetIntensity,
       expLerpFactor(5.5, delta)
     )
-    this.time += delta * (1 + this.intensity * 5)
+    const blur = this.intensity * 8
+    const clearRadius = 42 - this.intensity * 14
+    const softRadius = 62 - this.intensity * 10
+    const mask = `radial-gradient(circle at 50% 48%, transparent 0 ${clearRadius}%, rgba(0,0,0,0.35) ${softRadius}%, black 100%)`
+    this.canvas.style.backdropFilter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : ''
+    this.canvas.style.setProperty('-webkit-backdrop-filter', this.canvas.style.backdropFilter)
+    this.canvas.style.maskImage = mask
+    this.canvas.style.setProperty('-webkit-mask-image', mask)
 
     if (this.intensity < 0.015 && targetIntensity < 0.015) {
       if (this.hasVisibleFrame) {
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height)
+        this.canvas.style.backdropFilter = ''
+        this.canvas.style.removeProperty('-webkit-backdrop-filter')
+        this.canvas.style.maskImage = ''
+        this.canvas.style.removeProperty('-webkit-mask-image')
         this.hasVisibleFrame = false
       }
 
@@ -78,47 +88,36 @@ export class SpeedLinesOverlay {
     const logicalHeight = height / dpr
     const centerX = logicalWidth * 0.5
     const centerY = logicalHeight * 0.48
-    const lineCount = Math.floor(18 + this.intensity * 58)
 
     ctx.save()
     ctx.scale(dpr, dpr)
-    ctx.lineCap = 'round'
-
-    for (let i = 0; i < lineCount; i++) {
-      const side = i % 2 === 0 ? -1 : 1
-      const seed = (i * 47.13 + this.time * 9.7) % 1
-      const edgeBias = 0.68 + ((i * 19.37 + this.time * 1.7) % 1) * 0.3
-      const y = ((i * 83.17 + this.time * 340) % logicalHeight)
-      const x = side < 0
-        ? logicalWidth * (1 - edgeBias)
-        : logicalWidth * edgeBias
-      const dx = x - centerX
-      const dy = y - centerY
-      const length = (46 + seed * 118) * this.intensity
-      const distance = Math.max(Math.hypot(dx, dy), 1)
-      const nx = dx / distance
-      const ny = dy / distance
-      const alpha = (0.08 + seed * 0.16) * this.intensity
-
-      ctx.strokeStyle = `rgba(200, 230, 255, ${alpha})`
-      ctx.lineWidth = 1 + this.intensity * 2.3
-      ctx.beginPath()
-      ctx.moveTo(x, y)
-      ctx.lineTo(x - nx * length, y - ny * length)
-      ctx.stroke()
-    }
 
     const vignette = ctx.createRadialGradient(
       centerX,
       centerY,
-      logicalWidth * 0.2,
+      logicalWidth * (0.16 + this.intensity * 0.04),
       centerX,
       centerY,
-      logicalWidth * 0.72
+      logicalWidth * (0.58 - this.intensity * 0.1)
     )
     vignette.addColorStop(0, 'rgba(255,255,255,0)')
-    vignette.addColorStop(1, `rgba(125,180,255,${0.09 * this.intensity})`)
+    vignette.addColorStop(0.52, `rgba(15,22,28,${0.1 * this.intensity})`)
+    vignette.addColorStop(1, `rgba(2,6,10,${0.42 * this.intensity})`)
     ctx.fillStyle = vignette
+    ctx.fillRect(0, 0, logicalWidth, logicalHeight)
+
+    const tunnel = ctx.createRadialGradient(
+      centerX,
+      centerY,
+      logicalWidth * 0.05,
+      centerX,
+      centerY,
+      logicalWidth * 0.5
+    )
+    tunnel.addColorStop(0, `rgba(255,255,255,${0.025 * this.intensity})`)
+    tunnel.addColorStop(0.42, 'rgba(255,255,255,0)')
+    tunnel.addColorStop(1, `rgba(120,165,210,${0.09 * this.intensity})`)
+    ctx.fillStyle = tunnel
     ctx.fillRect(0, 0, logicalWidth, logicalHeight)
     ctx.restore()
   }

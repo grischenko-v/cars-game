@@ -90,7 +90,7 @@ export class HudView {
           majorStep: 40,
           minorStep: 20,
           accentColor: '#85d7ff',
-          bottomLabel: 'km/h',
+          bottomLabel: `${this.state.speed} km/h`,
         }),
         this.renderAnalogGauge({
           title: 'RPM',
@@ -101,7 +101,7 @@ export class HudView {
           minorStep: 0.5,
           accentColor: this.state.rpm > 6200 ? '#ff6b55' : '#f3e7a4',
           dangerFrom: 6.4,
-          bottomLabel: `GEAR ${this.state.gear}`,
+          bottomLabel: String(this.state.gear),
         }),
       ]
     )

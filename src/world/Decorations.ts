@@ -11,6 +11,8 @@ export interface ObstacleCollider {
   radius: number
 }
 
+export type GroundSurfaceKind = 'sand' | 'dirt'
+
 interface TreeInstance {
   x: number
   y: number
@@ -173,6 +175,26 @@ export class Decorations {
     return this.obstacleIndex.queryRadius(x, z, radius)
   }
 
+  getGroundSurfaceAt(x: number, z: number): GroundSurfaceKind | null {
+    for (const patch of this.groundPatchInstances) {
+      const dx = x - patch.x
+      const dz = z - patch.z
+      const cos = Math.cos(-patch.rotationY)
+      const sin = Math.sin(-patch.rotationY)
+      const localX = dx * cos - dz * sin
+      const localZ = dx * sin + dz * cos
+      const normalized =
+        (localX * localX) / (patch.scaleX * patch.scaleX) +
+        (localZ * localZ) / (patch.scaleZ * patch.scaleZ)
+
+      if (normalized <= 1) {
+        return patch.variant === 0 ? 'sand' : 'dirt'
+      }
+    }
+
+    return null
+  }
+
   private registerObstacle(obstacle: ObstacleCollider): void {
     this.obstacleColliders.push(obstacle)
     this.obstacleIndex.insert(obstacle)
@@ -181,7 +203,9 @@ export class Decorations {
   private populate(): void {
     const centerPos = new THREE.Vector3()
     const tangent = new THREE.Vector3()
-    const outside = new THREE.Vector3()
+    const sideNormal = new THREE.Vector3()
+
+    this.registerGuardrailColliders()
 
     const treeTargetCount = 84
     let treeAttempts = 0
@@ -193,12 +217,14 @@ export class Decorations {
       if (this.road.isNearStartSector(angle, 0.24)) continue
 
       this.road.sampleCenterlineByDistance(phase * this.road.totalLength, centerPos, tangent)
-      outside.set(centerPos.x, 0, centerPos.z).normalize()
+      sideNormal.set(-tangent.z, 0, tangent.x).normalize()
 
       const side = Math.random() > 0.3 ? 1 : -1
-      const offset = this.road.outerHalfWidth + this.randomRange(12, 72)
-      const x = centerPos.x + outside.x * offset * side
-      const z = centerPos.z + outside.z * offset * side
+      const offset =
+        this.road.getOuterHalfWidthAtDistance(phase * this.road.totalLength) +
+        this.randomRange(12, 72)
+      const x = centerPos.x + sideNormal.x * offset * side
+      const z = centerPos.z + sideNormal.z * offset * side
 
       if (!this.canPlaceAt(x, z, this.road.shoulderWidth + 4)) continue
       this.addTree(x, z)
@@ -215,12 +241,25 @@ export class Decorations {
         centerPos,
         tangent
       )
-      outside.set(centerPos.x, 0, centerPos.z).normalize()
+      sideNormal.set(-tangent.z, 0, tangent.x).normalize()
+      const clusterSide = i % 2 === 0 ? 1 : -1
 
       const clusterCenterX =
-        centerPos.x + outside.x * (this.road.outerHalfWidth + this.randomRange(26, 42))
+        centerPos.x +
+        sideNormal.x *
+          clusterSide *
+          (this.road.getOuterHalfWidthAtDistance(
+            THREE.MathUtils.euclideanModulo(phase, 1) * this.road.totalLength
+          ) +
+            this.randomRange(26, 42))
       const clusterCenterZ =
-        centerPos.z + outside.z * (this.road.outerHalfWidth + this.randomRange(26, 42))
+        centerPos.z +
+        sideNormal.z *
+          clusterSide *
+          (this.road.getOuterHalfWidthAtDistance(
+            THREE.MathUtils.euclideanModulo(phase, 1) * this.road.totalLength
+          ) +
+            this.randomRange(26, 42))
       const houseCount = THREE.MathUtils.randInt(2, 4)
       const tangentAngle = Math.atan2(tangent.x, tangent.z)
 
@@ -231,15 +270,17 @@ export class Decorations {
         const x =
           clusterCenterX +
           Math.sin(lateralAngle) * lateralOffset +
-          outside.x * radialPush
+          sideNormal.x * clusterSide * radialPush
         const z =
           clusterCenterZ +
           Math.cos(lateralAngle) * lateralOffset +
-          outside.z * radialPush
+          sideNormal.z * clusterSide * radialPush
 
         if (!this.canPlaceAt(x, z, this.road.shoulderWidth + 8)) continue
 
-        const rotationY = Math.atan2(-outside.x, -outside.z) + this.randomRange(-0.4, 0.4)
+        const rotationY =
+          Math.atan2(-sideNormal.x * clusterSide, -sideNormal.z * clusterSide) +
+          this.randomRange(-0.4, 0.4)
         this.addHouse(x, z, rotationY, this.randomRange(0.82, 1.28))
       }
     }
@@ -251,12 +292,14 @@ export class Decorations {
       patchAttempts += 1
       const phase = Math.random()
       this.road.sampleCenterlineByDistance(phase * this.road.totalLength, centerPos, tangent)
-      outside.set(centerPos.x, 0, centerPos.z).normalize()
+      sideNormal.set(-tangent.z, 0, tangent.x).normalize()
 
       const side = Math.random() > 0.5 ? 1 : -1
-      const offset = this.road.outerHalfWidth + this.randomRange(15, 85)
-      const x = centerPos.x + outside.x * offset * side + this.randomRange(-10, 10)
-      const z = centerPos.z + outside.z * offset * side + this.randomRange(-10, 10)
+      const offset =
+        this.road.getOuterHalfWidthAtDistance(phase * this.road.totalLength) +
+        this.randomRange(15, 85)
+      const x = centerPos.x + sideNormal.x * offset * side + this.randomRange(-10, 10)
+      const z = centerPos.z + sideNormal.z * offset * side + this.randomRange(-10, 10)
 
       if (!this.canPlaceAt(x, z, this.road.shoulderWidth + 9)) continue
       this.addGroundPatch(x, z, Math.random() > 0.32 ? 0 : 1)
@@ -269,15 +312,44 @@ export class Decorations {
       rockAttempts += 1
       const phase = Math.random()
       this.road.sampleCenterlineByDistance(phase * this.road.totalLength, centerPos, tangent)
-      outside.set(centerPos.x, 0, centerPos.z).normalize()
+      sideNormal.set(-tangent.z, 0, tangent.x).normalize()
 
       const side = Math.random() > 0.5 ? 1 : -1
-      const offset = this.road.outerHalfWidth + this.randomRange(18, 90)
-      const x = centerPos.x + outside.x * offset * side + this.randomRange(-14, 14)
-      const z = centerPos.z + outside.z * offset * side + this.randomRange(-14, 14)
+      const offset =
+        this.road.getOuterHalfWidthAtDistance(phase * this.road.totalLength) +
+        this.randomRange(18, 90)
+      const x = centerPos.x + sideNormal.x * offset * side + this.randomRange(-14, 14)
+      const z = centerPos.z + sideNormal.z * offset * side + this.randomRange(-14, 14)
 
       if (!this.canPlaceAt(x, z, this.road.shoulderWidth + 5)) continue
       this.addRock(x, z)
+    }
+  }
+
+  private registerGuardrailColliders(): void {
+    const center = new THREE.Vector3()
+    const tangent = new THREE.Vector3()
+    const sideNormal = new THREE.Vector3()
+    const spacing = 3.5
+    const count = Math.max(60, Math.floor(this.road.totalLength / spacing))
+
+    for (let i = 0; i < count; i++) {
+      const distance = (i / count) * this.road.totalLength
+
+      if (this.road.getEffectiveLaneCountAtDistance(distance) < 4) continue
+
+      this.road.sampleCenterlineByDistance(distance, center, tangent)
+      sideNormal.set(-tangent.z, 0, tangent.x).normalize()
+
+      for (const sideSign of [-1, 1]) {
+        const offset = sideSign * (this.road.getOuterHalfWidthAtDistance(distance) + 1.25)
+
+        this.registerObstacle({
+          x: center.x + sideNormal.x * offset,
+          z: center.z + sideNormal.z * offset,
+          radius: 2.1,
+        })
+      }
     }
   }
 
