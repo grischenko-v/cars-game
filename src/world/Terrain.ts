@@ -47,13 +47,13 @@ export class Terrain {
       metalness: 0,
       normalScale: new THREE.Vector2(0.38, 0.38),
       polygonOffset: true,
-      polygonOffsetFactor: 9,
-      polygonOffsetUnits: 9,
+      polygonOffsetFactor: 18,
+      polygonOffsetUnits: 18,
     })
 
     this.mesh = new THREE.Mesh(this.geometry, this.material)
     this.mesh.receiveShadow = true
-    this.mesh.renderOrder = -1
+    this.mesh.renderOrder = -10
     scene.add(this.mesh)
   }
 

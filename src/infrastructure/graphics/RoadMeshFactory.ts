@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { TrackModel } from '../../domain/road/TrackModel'
+import { getStartDistance, getStartGridSlots } from '../../domain/race/StartGrid'
 import type { PbrTextureSet } from './TextureFactory'
 import { loadRepeatingPbrTextures } from './TextureFactory'
 
@@ -12,6 +13,12 @@ export interface RoadSceneMeshes {
 }
 
 export class RoadMeshFactory {
+  private static readonly ASPHALT_PATCH_LIFT = 0.006
+  private static readonly ASPHALT_WEAR_LIFT = 0.008
+  private static readonly ASPHALT_CRACK_LIFT = 0.01
+  private static readonly PAINT_LIFT = 0.012
+  private static readonly RAISED_PAINT_LIFT = 0.016
+
   create(track: TrackModel): RoadSceneMeshes {
     const terrainBackfillGeometry = this.buildBandGeometry(
       track,
@@ -25,12 +32,12 @@ export class RoadMeshFactory {
       metalness: 0,
       side: THREE.DoubleSide,
       polygonOffset: true,
-      polygonOffsetFactor: 4,
-      polygonOffsetUnits: 4,
+      polygonOffsetFactor: 8,
+      polygonOffsetUnits: 8,
     })
     const terrainBackfill = new THREE.Mesh(terrainBackfillGeometry, terrainBackfillMaterial)
     terrainBackfill.receiveShadow = true
-    terrainBackfill.renderOrder = -1
+    terrainBackfill.renderOrder = -5
 
     const apronGeometry = this.buildBandGeometry(
       track,
@@ -44,8 +51,8 @@ export class RoadMeshFactory {
       metalness: 0,
       side: THREE.FrontSide,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -3,
+      polygonOffsetFactor: -6,
+      polygonOffsetUnits: -6,
     })
     const apron = new THREE.Mesh(apronGeometry, apronMaterial)
     apron.receiveShadow = true
@@ -71,9 +78,7 @@ export class RoadMeshFactory {
       transparent: false,
       opacity: 1,
       depthWrite: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -8,
-      polygonOffsetUnits: -8,
+      polygonOffset: false,
     })
     const road = new THREE.Mesh(roadGeometry, roadMaterial)
     road.frustumCulled = false
@@ -92,8 +97,8 @@ export class RoadMeshFactory {
       metalness: 0,
       side: THREE.FrontSide,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: -10,
+      polygonOffsetUnits: -10,
     })
     const shoulder = new THREE.Mesh(shoulderGeometry, shoulderMaterial)
     shoulder.receiveShadow = true
@@ -102,10 +107,10 @@ export class RoadMeshFactory {
     const laneMarkMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       side: THREE.DoubleSide,
-      depthWrite: true,
+      depthWrite: false,
       polygonOffset: true,
-      polygonOffsetFactor: -10,
-      polygonOffsetUnits: -10,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     })
     const markingGroup = new THREE.Group()
     const asphaltRepairs = new THREE.Mesh(
@@ -121,8 +126,8 @@ export class RoadMeshFactory {
         side: THREE.DoubleSide,
         depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: -7,
-        polygonOffsetUnits: -7,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       })
     )
     asphaltRepairs.frustumCulled = false
@@ -136,8 +141,8 @@ export class RoadMeshFactory {
         side: THREE.DoubleSide,
         depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: -7,
-        polygonOffsetUnits: -7,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       })
     )
     asphaltWear.frustumCulled = false
@@ -327,7 +332,12 @@ export class RoadMeshFactory {
       const laneCount = track.getEffectiveLaneCountAtDistance(centerDistance)
       const laneMarkingWidth = laneCount * track.nominalLaneWidth
 
-      if (this.isLaneMarkingTransition(track, centerDistance, dashLength)) continue
+      if (
+        this.isLaneMarkingTransition(track, centerDistance, dashLength) ||
+        this.isStartGridMarkingDistance(track, centerDistance, 62)
+      ) {
+        continue
+      }
 
       for (let separator = 1; separator < laneCount; separator++) {
         this.addLaneSeparatorDash(
@@ -337,7 +347,7 @@ export class RoadMeshFactory {
           laneMarkingWidth,
           dashLength,
           dashWidth,
-          0.2,
+          RoadMeshFactory.PAINT_LIFT,
           positions,
           normals,
           uvs,
@@ -359,6 +369,20 @@ export class RoadMeshFactory {
     geometry.setIndex(indices)
     geometry.computeBoundingSphere()
     return geometry
+  }
+
+  private isStartGridMarkingDistance(
+    track: TrackModel,
+    distance: number,
+    protectedLength: number
+  ): boolean {
+    const startDistance = getStartDistance(track)
+    const delta = THREE.MathUtils.euclideanModulo(
+      distance - startDistance + track.totalLength * 0.5,
+      track.totalLength
+    ) - track.totalLength * 0.5
+
+    return delta < 4 && delta > -protectedLength
   }
 
   private isLaneMarkingTransition(
@@ -443,10 +467,38 @@ export class RoadMeshFactory {
       const nextInnerOffset = sideSign * Math.max(0, nextHalfWidth - edgeInset - edgeWidth)
       const base = positions.length / 3
 
-      this.addRoadPaintPoint(track, distance, outerOffset, 0.24, positions, normals)
-      this.addRoadPaintPoint(track, distance, innerOffset, 0.24, positions, normals)
-      this.addRoadPaintPoint(track, nextDistance, nextOuterOffset, 0.24, positions, normals)
-      this.addRoadPaintPoint(track, nextDistance, nextInnerOffset, 0.24, positions, normals)
+      this.addRoadPaintPoint(
+        track,
+        distance,
+        outerOffset,
+        RoadMeshFactory.PAINT_LIFT,
+        positions,
+        normals
+      )
+      this.addRoadPaintPoint(
+        track,
+        distance,
+        innerOffset,
+        RoadMeshFactory.PAINT_LIFT,
+        positions,
+        normals
+      )
+      this.addRoadPaintPoint(
+        track,
+        nextDistance,
+        nextOuterOffset,
+        RoadMeshFactory.PAINT_LIFT,
+        positions,
+        normals
+      )
+      this.addRoadPaintPoint(
+        track,
+        nextDistance,
+        nextInnerOffset,
+        RoadMeshFactory.PAINT_LIFT,
+        positions,
+        normals
+      )
       uvs.push(0, 0, 0, 1, 1, 0, 1, 1)
 
       if (sideSign > 0) {
@@ -581,7 +633,7 @@ export class RoadMeshFactory {
         track.roadY,
         false,
         track,
-        0.17
+        RoadMeshFactory.ASPHALT_WEAR_LIFT
       )
 
       if (i % 3 === 0) {
@@ -604,7 +656,7 @@ export class RoadMeshFactory {
           track.roadY,
           false,
           track,
-          0.18
+          RoadMeshFactory.ASPHALT_CRACK_LIFT
         )
       }
     }
@@ -660,7 +712,7 @@ export class RoadMeshFactory {
         track.roadY,
         false,
         track,
-        0.13
+        RoadMeshFactory.ASPHALT_PATCH_LIFT
       )
     }
 
@@ -763,10 +815,10 @@ export class RoadMeshFactory {
       side: THREE.DoubleSide,
       transparent: false,
       opacity: options.opacity,
-      depthWrite: true,
+      depthWrite: false,
       polygonOffset: true,
-      polygonOffsetFactor: -4,
-      polygonOffsetUnits: -4,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     })
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false
@@ -832,7 +884,7 @@ export class RoadMeshFactory {
         track.roadY,
         false,
         track,
-        0.026
+        RoadMeshFactory.ASPHALT_PATCH_LIFT
       )
     }
 
@@ -1086,11 +1138,8 @@ export class RoadMeshFactory {
     const normals: number[] = []
     const uvs: number[] = []
     const indices: number[] = []
-    const y = track.roadY + 0.105
-    const startDistance =
-      (THREE.MathUtils.euclideanModulo(track.startAngle, Math.PI * 2) / (Math.PI * 2)) *
-      track.totalLength
-    const startHalfWidth = track.getTrackHalfWidthAtDistance(startDistance)
+    const y = track.roadY
+    const startDistance = getStartDistance(track)
     const center = new THREE.Vector3()
     const tangent = new THREE.Vector3()
     const side = new THREE.Vector3()
@@ -1107,21 +1156,8 @@ export class RoadMeshFactory {
       y
     )
 
-    const slotLength = 6.2
-    const slotWidth = 3.45
     const lineWidth = 0.22
-    const firstOpponentOffset = -5.1
-    const rowSpacing = 7.2
-    const lateralOffset = startHalfWidth * 0.26
-    const slotCenters = [
-      { distanceOffset: firstOpponentOffset, lateralOffset: -lateralOffset },
-      { distanceOffset: firstOpponentOffset - rowSpacing, lateralOffset },
-      { distanceOffset: firstOpponentOffset - rowSpacing * 2, lateralOffset: -lateralOffset },
-      { distanceOffset: firstOpponentOffset - rowSpacing * 3, lateralOffset },
-      { distanceOffset: firstOpponentOffset - rowSpacing * 4, lateralOffset: -lateralOffset },
-      { distanceOffset: firstOpponentOffset - rowSpacing * 5, lateralOffset },
-      { distanceOffset: firstOpponentOffset - rowSpacing * 6, lateralOffset: -lateralOffset },
-    ]
+    const slotCenters = getStartGridSlots(track)
 
     for (const slot of slotCenters) {
       track.sampleCenterlineByDistance(startDistance + slot.distanceOffset, center, tangent)
@@ -1134,8 +1170,8 @@ export class RoadMeshFactory {
         indices,
         center,
         tangent,
-        slotLength,
-        slotWidth,
+        slot.length,
+        slot.width,
         lineWidth,
         y,
         track
@@ -1170,10 +1206,7 @@ export class RoadMeshFactory {
     const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize()
     const square = 1.35
     const rows = 2
-    const startWidth = track.getTrackHalfWidthAtDistance(
-      (THREE.MathUtils.euclideanModulo(track.startAngle, Math.PI * 2) / (Math.PI * 2)) *
-        track.totalLength
-    ) * 2
+    const startWidth = track.getTrackHalfWidthAtDistance(getStartDistance(track)) * 2
     const columns = Math.max(4, Math.floor((startWidth * 0.92) / square))
     const totalWidth = columns * square
     const cellCenter = new THREE.Vector3()
@@ -1201,7 +1234,7 @@ export class RoadMeshFactory {
           y,
           false,
           track,
-          0.24
+          RoadMeshFactory.RAISED_PAINT_LIFT
         )
       }
     }
@@ -1218,7 +1251,7 @@ export class RoadMeshFactory {
       y,
       true,
       track,
-      0.25
+      RoadMeshFactory.RAISED_PAINT_LIFT
     )
   }
 
@@ -1237,70 +1270,52 @@ export class RoadMeshFactory {
   ): void {
     const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize()
     const rectCenter = new THREE.Vector3()
+    const cornerLength = Math.min(length * 0.28, 1.8)
+    const cornerWidth = Math.min(width * 0.34, 1.25)
+    const front = length * 0.5
+    const sideEdge = width * 0.5
 
-    rectCenter.copy(center).addScaledVector(tangent, length * 0.42)
-    this.addOrientedRect(
-      positions,
-      normals,
-      uvs,
-      indices,
-      rectCenter,
-      tangent,
-      width,
-      lineWidth,
-      y,
-      true,
-      track,
-      0.22
-    )
+    for (const forwardSign of [-1, 1]) {
+      for (const sideSign of [-1, 1]) {
+        rectCenter
+          .copy(center)
+          .addScaledVector(tangent, forwardSign * (front - cornerLength * 0.5))
+          .addScaledVector(side, sideSign * sideEdge)
+        this.addOrientedRect(
+          positions,
+          normals,
+          uvs,
+          indices,
+          rectCenter,
+          tangent,
+          cornerLength,
+          lineWidth,
+          y,
+          false,
+          track,
+          RoadMeshFactory.RAISED_PAINT_LIFT
+        )
 
-    rectCenter.copy(center).addScaledVector(tangent, -length * 0.42)
-    this.addOrientedRect(
-      positions,
-      normals,
-      uvs,
-      indices,
-      rectCenter,
-      tangent,
-      width,
-      lineWidth,
-      y,
-      true,
-      track,
-      0.22
-    )
-
-    rectCenter.copy(center).addScaledVector(side, width * 0.5)
-    this.addOrientedRect(
-      positions,
-      normals,
-      uvs,
-      indices,
-      rectCenter,
-      tangent,
-      length,
-      lineWidth,
-      y,
-      false,
-      track,
-      0.22
-    )
-
-    rectCenter.copy(center).addScaledVector(side, -width * 0.5)
-    this.addOrientedRect(
-      positions,
-      normals,
-      uvs,
-      indices,
-      rectCenter,
-      tangent,
-      length,
-      lineWidth,
-      y,
-      false,
-      track,
-      0.22
-    )
+        rectCenter
+          .copy(center)
+          .addScaledVector(tangent, forwardSign * front)
+          .addScaledVector(side, sideSign * (sideEdge - cornerWidth * 0.5))
+        this.addOrientedRect(
+          positions,
+          normals,
+          uvs,
+          indices,
+          rectCenter,
+          tangent,
+          cornerWidth,
+          lineWidth,
+          y,
+          true,
+          track,
+          RoadMeshFactory.RAISED_PAINT_LIFT
+        )
+      }
+    }
   }
 
   private addOrientedRect(
@@ -1365,11 +1380,20 @@ export class RoadMeshFactory {
     normals: number[]
   ): void {
     const band = track.getBandData(point.x, point.z)
+    const edgeInset = 0.55
+    const safeHalfWidth = Math.max(band.halfWidth - edgeInset, 0.2)
+    const lateralOffset = THREE.MathUtils.clamp(
+      band.lateralOffset,
+      -safeHalfWidth,
+      safeHalfWidth
+    )
+    const clampedX = band.nearestPoint.x - band.tangent.z * lateralOffset
+    const clampedZ = band.nearestPoint.z + band.tangent.x * lateralOffset
     const y =
-      track.getBankedHeightAtDistance(band.distanceAlong, band.lateralOffset, track.roadY) + lift
+      track.getBankedHeightAtDistance(band.distanceAlong, lateralOffset, track.roadY) + lift
     const normal = track.getBankedNormalAtDistance(band.distanceAlong)
 
-    positions.push(point.x, y, point.z)
+    positions.push(clampedX, y, clampedZ)
     normals.push(normal.x, normal.y, normal.z)
   }
 }

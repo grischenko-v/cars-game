@@ -30,16 +30,16 @@ export class RandomClosedLoopTrackStrategy implements TrackGenerationStrategy {
     private readonly config = {
       roadWidth: 28,
       shoulderWidth: 5,
-      roadY: 0.24,
-      shoulderY: 0.17,
-      apronY: 0.12,
+      roadY: 0.36,
+      shoulderY: 0.27,
+      apronY: 0.2,
       shoulderBlend: 5.5,
       terrainBlend: 24,
-      cutDepth: 0.22,
+      cutDepth: 0.34,
       terrainCalmDistance: 34,
       terrainCalmFactor: 0.08,
-      terrainHardMargin: 4.5,
-      terrainShoulderMargin: 3,
+      terrainHardMargin: 7,
+      terrainShoulderMargin: 4,
       apronWidth: 8,
     }
   ) {}

@@ -7,6 +7,7 @@ import type { VehicleAssetDefinition } from './VehicleAssetCatalog'
 
 export interface CarPhysicsBounds {
   minY: number
+  groundContactY: number
   minX: number
   maxX: number
   minZ: number
@@ -40,13 +41,17 @@ export class CarTemplateFactory {
 
     const localBox = view.getLocalBounds()
     if (localBox) {
-      const computed = this.createPhysicsBounds(localBox)
+      const computed = this.createPhysicsBounds(
+        localBox,
+        view.estimateWheelContactY(localBox) ?? localBox.min.y
+      )
       this.boundsByView.set(view, computed)
       return computed
     }
 
     const fallback = {
       minY: 0,
+      groundContactY: 0,
       minX: -0.95,
       maxX: 0.95,
       minZ: -2.2,
@@ -69,7 +74,7 @@ export class CarTemplateFactory {
           modelRoot.add(gltf.scene)
 
           const view = new CarView(modelRoot)
-          const prepared = this.prepare(view, definition.spec)
+          const prepared = this.prepare(view, definition)
 
           if (!prepared) {
             reject(new Error(`Не удалось подготовить модель ${definition.spec.name}`))
@@ -84,9 +89,10 @@ export class CarTemplateFactory {
     })
   }
 
-  private prepare(view: CarView, spec: VehicleSpec): CarTemplate | null {
+  private prepare(view: CarView, definition: VehicleAssetDefinition): CarTemplate | null {
     const box = view.getLocalBounds()
     if (!box) return null
+    const spec = definition.spec
 
     const center = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3())
@@ -107,18 +113,25 @@ export class CarTemplateFactory {
     const localBox = view.getLocalBounds()
     if (!localBox) return null
 
-    const bounds = this.createPhysicsBounds(localBox)
+    const wheelContactY = view.estimateWheelContactY(localBox)
+    const bounds = this.createPhysicsBounds(
+      localBox,
+      wheelContactY ?? localBox.min.y
+    )
     this.boundsByView.set(view, bounds)
 
     return { spec, view, bounds }
   }
 
-  private createPhysicsBounds(localBox: THREE.Box3): CarPhysicsBounds {
+  private createPhysicsBounds(
+    localBox: THREE.Box3,
+    _groundContactY: number
+  ): CarPhysicsBounds {
     const width = localBox.max.x - localBox.min.x
     const length = localBox.max.z - localBox.min.z
-
     return {
       minY: localBox.min.y,
+      groundContactY: localBox.min.y,
       minX: localBox.min.x,
       maxX: localBox.max.x,
       minZ: localBox.min.z,

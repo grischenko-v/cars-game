@@ -28,10 +28,23 @@ export class CarView {
   }
 
   enableShadows(): void {
+    this.root.renderOrder = 20
+
     this.root.traverse((child) => {
       if (isMeshObject(child)) {
         child.castShadow = true
         child.receiveShadow = false
+        child.renderOrder = 20
+
+        const materials = Array.isArray(child.material) ? child.material : [child.material]
+        for (const material of materials) {
+          if (!material) continue
+
+          material.depthTest = true
+          material.depthWrite = true
+          material.transparent = false
+          material.polygonOffset = false
+        }
       }
     })
   }
@@ -99,6 +112,10 @@ export class CarView {
     this.root.scale.setScalar(scale)
   }
 
+  getScaleY(): number {
+    return this.root.scale.y
+  }
+
   updateMatrixWorld(force = true): void {
     this.root.updateMatrixWorld(force)
   }
@@ -108,7 +125,7 @@ export class CarView {
   }
 
   worldPointFromLocal(x: number, y: number, z: number, out: THREE.Vector3): THREE.Vector3 {
-    out.set(x, y, z).applyQuaternion(this.root.quaternion).add(this.root.position)
+    out.set(x, y, z).applyMatrix4(this.root.matrixWorld)
     return out
   }
 
@@ -148,5 +165,50 @@ export class CarView {
     })
 
     return hasGeometry ? bounds : null
+  }
+
+  estimateWheelContactY(localBox: THREE.Box3): number | null {
+    const rootInverse = new THREE.Matrix4()
+    const childToRoot = new THREE.Matrix4()
+    const point = new THREE.Vector3()
+    const centerX = (localBox.min.x + localBox.max.x) * 0.5
+    const centerZ = (localBox.min.z + localBox.max.z) * 0.5
+    const width = localBox.max.x - localBox.min.x
+    const length = localBox.max.z - localBox.min.z
+    const height = localBox.max.y - localBox.min.y
+    const sideThreshold = width * 0.22
+    const axleThreshold = length * 0.16
+    const lowerBodyLimit = localBox.min.y + height * 0.58
+    let contactY = Infinity
+    let candidateCount = 0
+
+    this.root.updateMatrixWorld(true)
+    rootInverse.copy(this.root.matrixWorld).invert()
+
+    this.root.traverse((child) => {
+      if (!isMeshObject(child) || !child.geometry) return
+
+      const position = child.geometry.getAttribute('position')
+      if (!position) return
+
+      childToRoot.multiplyMatrices(rootInverse, child.matrixWorld)
+
+      for (let i = 0; i < position.count; i++) {
+        point
+          .set(position.getX(i), position.getY(i), position.getZ(i))
+          .applyMatrix4(childToRoot)
+
+        const isSideVertex = Math.abs(point.x - centerX) >= sideThreshold
+        const isAxleVertex = Math.abs(point.z - centerZ) >= axleThreshold
+        const isLowerVertex = point.y <= lowerBodyLimit
+
+        if (!isSideVertex || !isAxleVertex || !isLowerVertex) continue
+
+        contactY = Math.min(contactY, point.y)
+        candidateCount += 1
+      }
+    })
+
+    return candidateCount > 64 ? contactY : null
   }
 }

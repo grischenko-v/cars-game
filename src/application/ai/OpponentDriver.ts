@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import { Car } from '../../domain/car/Car'
+import type { RoadBandData } from '../../domain/road/TrackModel'
 import { clamp } from '../../utils/math'
 import type { Road } from '../../world/Road'
+import type { RacingLinePlan } from './RacingLinePlan'
 
 export interface OpponentControls {
   throttle: number
@@ -22,6 +24,7 @@ export interface OpponentDriverConfig {
 
 export class OpponentDriver {
   private readonly racingLineSafety = 0.74
+  private racingLinePlan: RacingLinePlan | null = null
   private readonly target = new THREE.Vector3()
   private readonly tangent = new THREE.Vector3()
   private readonly candidate = new THREE.Vector3()
@@ -37,11 +40,16 @@ export class OpponentDriver {
 
   constructor(private readonly config: OpponentDriverConfig) {}
 
+  setRacingLinePlan(plan: RacingLinePlan): void {
+    this.racingLinePlan = plan
+  }
+
   decide(
     car: Car,
     road: Road,
     position: THREE.Vector3,
-    canDrive: boolean
+    canDrive: boolean,
+    roadBand?: RoadBandData
   ): OpponentControls {
     if (!canDrive) {
       return {
@@ -53,9 +61,22 @@ export class OpponentDriver {
       }
     }
 
-    const roadBand = road.getBandData(position.x, position.z)
+    roadBand ??= road.getBandData(position.x, position.z)
     const speedRatio = clamp(car.absSpeed / this.config.maxSpeed, 0, 1)
     const aggression = this.config.aggression ?? 0.7
+    const planControls = this.decideFromRacingLinePlan(
+      car,
+      roadBand.distanceAlong,
+      roadBand.halfWidth,
+      roadBand.distFromRoadCenter,
+      roadBand.lateralOffset,
+      position,
+      speedRatio,
+      aggression
+    )
+
+    if (planControls) return planControls
+
     const lookAhead = THREE.MathUtils.lerp(26, 68, speedRatio)
 
     this.currentTangent.copy(roadBand.tangent).normalize()
@@ -133,6 +154,110 @@ export class OpponentDriver {
       brake,
       speedFactor,
       accelerationFactor: this.config.accelerationFactor ?? 1,
+    }
+  }
+
+  private decideFromRacingLinePlan(
+    car: Car,
+    distanceAlong: number,
+    trackHalfWidth: number,
+    distFromRoadCenter: number,
+    lateralOffset: number,
+    position: THREE.Vector3,
+    speedRatio: number,
+    aggression: number
+  ): OpponentControls | null {
+    if (!this.racingLinePlan) return null
+
+    const lookAhead = THREE.MathUtils.lerp(30, 78, speedRatio)
+    const sample = this.sampleRacingLine(distanceAlong + lookAhead)
+    const sideX = -this.tangent.z
+    const sideZ = this.tangent.x
+    const lineBiasOffset = sample.halfWidth * (this.config.lineBias ?? 0) * 0.055
+
+    this.target.x += sideX * lineBiasOffset
+    this.target.z += sideZ * lineBiasOffset
+    this.toTarget.subVectors(this.target, position)
+
+    const desiredHeading = Math.atan2(this.toTarget.x, this.toTarget.z)
+    const headingError =
+      THREE.MathUtils.euclideanModulo(desiredHeading - car.heading + Math.PI, Math.PI * 2) -
+      Math.PI
+    const lateralError = lateralOffset / Math.max(trackHalfWidth, 0.001)
+    const asphaltLimitPressure = clamp(
+      (distFromRoadCenter - trackHalfWidth * 0.76) / Math.max(trackHalfWidth * 0.24, 0.001),
+      0,
+      1
+    )
+    const steer = clamp(
+      (headingError * (2.08 + aggression * 0.62) - lateralError * 1.18) /
+        this.config.maxSteer,
+      -1,
+      1
+    )
+    const curveSpeedFactor = THREE.MathUtils.lerp(sample.speedFactor, 1, aggression * 0.18)
+    const headingSpeedFactor = THREE.MathUtils.lerp(
+      1,
+      0.84,
+      clamp(Math.abs(headingError) / 1.15, 0, 1)
+    )
+    const surfaceSpeedFactor = THREE.MathUtils.lerp(1, 0.78, asphaltLimitPressure)
+    const speedFactor =
+      this.config.speedFactor * curveSpeedFactor * headingSpeedFactor * surfaceSpeedFactor
+    const targetSpeed = this.config.maxSpeed * speedFactor
+    const overspeed = car.speed - targetSpeed
+    const shouldBrake =
+      overspeed > THREE.MathUtils.lerp(5.4, 2.4, sample.curveAmount) ||
+      (asphaltLimitPressure > 0.9 && speedRatio > 0.68)
+    const throttle = shouldBrake ? -1 : overspeed > 1.1 ? 0 : 1
+
+    return {
+      throttle,
+      steer,
+      brake: shouldBrake,
+      speedFactor,
+      accelerationFactor: this.config.accelerationFactor ?? 1,
+    }
+  }
+
+  private sampleRacingLine(distance: number): {
+    halfWidth: number
+    speedFactor: number
+    curveAmount: number
+  } {
+    const plan = this.racingLinePlan as RacingLinePlan
+    const count = plan.x.length
+    const loopDistance = THREE.MathUtils.euclideanModulo(distance, plan.totalLength)
+    const rawIndex = loopDistance / plan.sampleSpacing
+    const index = Math.floor(rawIndex) % count
+    const nextIndex = (index + 1) % count
+    const t = rawIndex - Math.floor(rawIndex)
+
+    this.target.set(
+      THREE.MathUtils.lerp(plan.x[index], plan.x[nextIndex], t),
+      0,
+      THREE.MathUtils.lerp(plan.z[index], plan.z[nextIndex], t)
+    )
+    this.tangent
+      .set(
+        THREE.MathUtils.lerp(plan.tangentX[index], plan.tangentX[nextIndex], t),
+        0,
+        THREE.MathUtils.lerp(plan.tangentZ[index], plan.tangentZ[nextIndex], t)
+      )
+      .normalize()
+
+    return {
+      halfWidth: THREE.MathUtils.lerp(plan.halfWidth[index], plan.halfWidth[nextIndex], t),
+      speedFactor: THREE.MathUtils.lerp(
+        plan.speedFactor[index],
+        plan.speedFactor[nextIndex],
+        t
+      ),
+      curveAmount: THREE.MathUtils.lerp(
+        plan.curveAmount[index],
+        plan.curveAmount[nextIndex],
+        t
+      ),
     }
   }
 

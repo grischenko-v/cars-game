@@ -14,4 +14,5 @@ export interface Competitor {
   driver: OpponentDriver | null
   minimapColor: string
   vehicleSpec: VehicleSpec
+  railLateralOffset?: number
 }
