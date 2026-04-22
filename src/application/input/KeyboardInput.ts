@@ -5,6 +5,7 @@ export interface KeyState {
   right: boolean
   brake: boolean
   restart: boolean
+  cameraToggle: boolean
 }
 
 type KeyBinding = keyof KeyState
@@ -17,16 +18,22 @@ export class KeyboardInput {
     right: false,
     brake: false,
     restart: false,
+    cameraToggle: false,
   }
 
   private readonly bindings = new Map<string, KeyBinding>([
     ['ArrowUp', 'forward'],
+    ['KeyW', 'forward'],
     ['ArrowDown', 'backward'],
+    ['KeyS', 'backward'],
     ['ArrowLeft', 'left'],
+    ['KeyA', 'left'],
     ['ArrowRight', 'right'],
+    ['KeyD', 'right'],
     ['Space', 'brake'],
     ['KeyR', 'restart'],
     ['Enter', 'restart'],
+    ['KeyV', 'cameraToggle'],
   ])
 
   constructor(private readonly target: Window = window) {
@@ -50,6 +57,15 @@ export class KeyboardInput {
   private setKey(event: KeyboardEvent, pressed: boolean): void {
     const binding = this.bindings.get(event.code)
     if (!binding) return
+
+    if (binding === 'cameraToggle') {
+      if (pressed && !event.repeat) {
+        this.keys.cameraToggle = true
+      }
+
+      event.preventDefault()
+      return
+    }
 
     this.keys[binding] = pressed
     event.preventDefault()

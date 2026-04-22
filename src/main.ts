@@ -21,6 +21,7 @@ import type { DriveControls } from './application/physics/DriveControls'
 import type { Competitor } from './application/race/Competitor'
 import { createDefaultOpponentProfiles } from './application/race/OpponentProfile'
 import { HudView } from './application/ui/HudView'
+import { CockpitView } from './application/ui/CockpitView'
 import { LoadingView } from './application/ui/LoadingView'
 import { MinimapView } from './application/ui/MinimapView'
 import type { MinimapCarMarker } from './application/ui/MinimapView'
@@ -46,6 +47,7 @@ import type { StandingEntry } from './domain/race/RaceStandings'
 const gameRenderer = new GameRenderer()
 const { scene, camera, renderer } = gameRenderer
 const hud = new HudView()
+const cockpitView = new CockpitView()
 const loadingView = new LoadingView()
 const standingsView = new StandingsView()
 const positionLabelView = new PositionLabelView()
@@ -982,7 +984,21 @@ function updateDrive(delta: number): void {
   const kmh = Math.round(
     Math.abs(carAggregate.signedSpeedAlongForward(tmpVecA)) * HUD_SPEED_MULTIPLIER
   )
+  const normalizedSteer = clamp(
+    carAggregate.steer / Math.max(playerMaxSteer, 0.001),
+    -1,
+    1
+  )
+
   hud.updateInstruments(kmh, carAggregate.rpm, carAggregate.gear)
+  cockpitView.update(
+    cameraRig.currentViewMode === 'cockpit',
+    kmh,
+    carAggregate.rpm,
+    carAggregate.gear,
+    normalizedSteer,
+    vehicleSpec.id
+  )
 }
 
 function updateOpponents(delta: number): void {
@@ -1311,6 +1327,12 @@ function animate(): void {
   snapCollisionMovedCompetitorsToSurface()
   updateCompetitionUi(delta)
   skidTrail.update(carView, carAggregate, keys, road, terrain)
+
+  if (keys.cameraToggle) {
+    cameraRig.cycleViewMode(carView, carAggregate.heading)
+    keys.cameraToggle = false
+  }
+
   cameraRig.update(carView, carAggregate.heading, carAggregate.speed, delta)
   speedLines.update(carAggregate.speed, delta)
   minimapUpdateTimer -= delta
