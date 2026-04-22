@@ -11,6 +11,8 @@ export class GameRenderer {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   readonly renderer: THREE.WebGLRenderer
+  private readonly skyTopColor = new THREE.Color(0x6eaefc)
+  private readonly skyBottomColor = new THREE.Color(0xf1f7ff)
 
   constructor(private readonly container: HTMLElement = document.body) {
     this.scene = this.createScene()
@@ -27,6 +29,17 @@ export class GameRenderer {
     this.renderer.render(this.scene, this.camera)
   }
 
+  setSky(topColor: THREE.ColorRepresentation, bottomColor: THREE.ColorRepresentation): void {
+    this.skyTopColor.set(topColor)
+    this.skyBottomColor.set(bottomColor)
+  }
+
+  setFog(color: THREE.ColorRepresentation, near: number, far: number): void {
+    const fogColor = new THREE.Color(color)
+    this.scene.background = fogColor.lerp(this.skyBottomColor, 0.38)
+    this.scene.fog = new THREE.Fog(fogColor, near, far)
+  }
+
   dispose(): void {
     window.removeEventListener('resize', this.handleResize)
     this.renderer.dispose()
@@ -36,7 +49,6 @@ export class GameRenderer {
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x9fc6ff)
     scene.fog = new THREE.Fog(0x9fc6ff, 80, 340)
-    scene.add(this.createSky())
     return scene
   }
 
@@ -61,41 +73,6 @@ export class GameRenderer {
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFShadowMap
     return renderer
-  }
-
-  private createSky(): THREE.Mesh {
-    return new THREE.Mesh(
-      new THREE.SphereGeometry(900, 32, 32),
-      new THREE.ShaderMaterial({
-        side: THREE.BackSide,
-        uniforms: {
-          topColor: { value: new THREE.Color(0x6eaefc) },
-          bottomColor: { value: new THREE.Color(0xf1f7ff) },
-          offset: { value: 140 },
-          exponent: { value: 0.9 },
-        },
-        vertexShader: `
-          varying vec3 vWorldPosition;
-          void main() {
-            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-            vWorldPosition = worldPosition.xyz;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }
-        `,
-        fragmentShader: `
-          uniform vec3 topColor;
-          uniform vec3 bottomColor;
-          uniform float offset;
-          uniform float exponent;
-          varying vec3 vWorldPosition;
-          void main() {
-            float h = normalize(vWorldPosition + vec3(0.0, offset, 0.0)).y;
-            float t = max(pow(max(h, 0.0), exponent), 0.0);
-            gl_FragColor = vec4(mix(bottomColor, topColor, t), 1.0);
-          }
-        `,
-      })
-    )
   }
 
   private readonly handleResize = (): void => {

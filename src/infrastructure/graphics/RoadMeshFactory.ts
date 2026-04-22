@@ -13,6 +13,7 @@ export interface RoadSceneMeshes {
 }
 
 export class RoadMeshFactory {
+  private static readonly ROAD_MESH_SAMPLE_SPACING = 4
   private static readonly ASPHALT_PATCH_LIFT = 0.006
   private static readonly ASPHALT_WEAR_LIFT = 0.008
   private static readonly ASPHALT_CRACK_LIFT = 0.01
@@ -185,29 +186,40 @@ export class RoadMeshFactory {
     return { terrainBackfill, apron, road, shoulder, markingGroup }
   }
 
-  private buildOffsetLoop(track: TrackModel, offset: number, y: number): THREE.Vector3[] {
-    const loop: THREE.Vector3[] = []
-    const count = track.centerline.length
+  private buildOffsetSamples(
+    track: TrackModel,
+    offset: number,
+    y: number
+  ): { points: THREE.Vector3[]; distances: number[] } {
+    const points: THREE.Vector3[] = []
+    const distances: number[] = []
+    const sampleCount = Math.max(
+      track.centerline.length,
+      Math.ceil(track.totalLength / RoadMeshFactory.ROAD_MESH_SAMPLE_SPACING)
+    )
+    const center = new THREE.Vector3()
+    const tangent = new THREE.Vector3()
 
-    for (let i = 0; i < count; i++) {
-      const prev = track.centerline[(i - 1 + count) % count]
-      const current = track.centerline[i]
-      const next = track.centerline[(i + 1) % count]
-      const tangent = new THREE.Vector3(next.x - prev.x, 0, next.z - prev.z).normalize()
-      const distance = track.cumulativeLengths[i] ?? 0
+    for (let i = 0; i < sampleCount; i++) {
+      const distance = (i / sampleCount) * track.totalLength
+
+      track.sampleCenterlineByDistance(distance, center, tangent)
       const dynamicOffset = this.getDynamicOffset(track, offset, distance)
       const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).multiplyScalar(dynamicOffset)
       const bankedY = track.getBankedHeightAtDistance(distance, dynamicOffset, y)
 
-      loop.push(new THREE.Vector3(current.x + normal.x, bankedY, current.z + normal.z))
+      points.push(new THREE.Vector3(center.x + normal.x, bankedY, center.z + normal.z))
+      distances.push(distance)
     }
 
-    return loop
+    return { points, distances }
   }
 
   private buildRibbonGeometry(track: TrackModel, halfWidth: number, y: number): THREE.BufferGeometry {
-    const leftLoop = this.buildOffsetLoop(track, halfWidth, y)
-    const rightLoop = this.buildOffsetLoop(track, -halfWidth, y)
+    const leftSamples = this.buildOffsetSamples(track, halfWidth, y)
+    const rightSamples = this.buildOffsetSamples(track, -halfWidth, y)
+    const leftLoop = leftSamples.points
+    const rightLoop = rightSamples.points
     const positions: number[] = []
     const normals: number[] = []
     const uvs: number[] = []
@@ -223,8 +235,9 @@ export class RoadMeshFactory {
       if (i > 0) {
         u += left.distanceTo(leftLoop[i - 1])
       }
-      const normal = track.getBankedNormalAtDistance(track.cumulativeLengths[i] ?? 0)
-      const shade = this.getAsphaltShadeAtDistance(track.cumulativeLengths[i] ?? 0)
+      const distance = leftSamples.distances[i] ?? 0
+      const normal = track.getBankedNormalAtDistance(distance)
+      const shade = this.getAsphaltShadeAtDistance(distance)
       color.setRGB(0.48 * shade, 0.5 * shade, 0.49 * shade)
 
       positions.push(left.x, left.y, left.z, right.x, right.y, right.z)
@@ -265,10 +278,14 @@ export class RoadMeshFactory {
     outerHalfWidth: number,
     y: number
   ): THREE.BufferGeometry {
-    const outerLeftLoop = this.buildOffsetLoop(track, outerHalfWidth, y)
-    const innerLeftLoop = this.buildOffsetLoop(track, innerHalfWidth, y)
-    const innerRightLoop = this.buildOffsetLoop(track, -innerHalfWidth, y)
-    const outerRightLoop = this.buildOffsetLoop(track, -outerHalfWidth, y)
+    const outerLeftSamples = this.buildOffsetSamples(track, outerHalfWidth, y)
+    const innerLeftSamples = this.buildOffsetSamples(track, innerHalfWidth, y)
+    const innerRightSamples = this.buildOffsetSamples(track, -innerHalfWidth, y)
+    const outerRightSamples = this.buildOffsetSamples(track, -outerHalfWidth, y)
+    const outerLeftLoop = outerLeftSamples.points
+    const innerLeftLoop = innerLeftSamples.points
+    const innerRightLoop = innerRightSamples.points
+    const outerRightLoop = outerRightSamples.points
     const positions: number[] = []
     const normals: number[] = []
     const uvs: number[] = []
@@ -284,7 +301,7 @@ export class RoadMeshFactory {
       if (i > 0) {
         u += outerLeft.distanceTo(outerLeftLoop[i - 1])
       }
-      const normal = track.getBankedNormalAtDistance(track.cumulativeLengths[i] ?? 0)
+      const normal = track.getBankedNormalAtDistance(outerLeftSamples.distances[i] ?? 0)
 
       positions.push(
         outerLeft.x, outerLeft.y, outerLeft.z,
@@ -1420,6 +1437,10 @@ export class RoadMeshFactory {
         .addScaledVector(shortAxis, halfWidth),
     ]
 
+    if (track && !this.isRoadRectSafelyInsideTrack(track, corners)) {
+      return
+    }
+
     for (const corner of corners) {
       if (track) {
         this.addRoadPaintCorner(track, corner, lift, positions, normals)
@@ -1432,6 +1453,19 @@ export class RoadMeshFactory {
     uvs.push(0, 0, 1, 0, 0, 1, 1, 1)
     indices.push(base, base + 1, base + 2)
     indices.push(base + 1, base + 3, base + 2)
+  }
+
+  private isRoadRectSafelyInsideTrack(track: TrackModel, corners: THREE.Vector3[]): boolean {
+    for (const corner of corners) {
+      const band = track.getBandData(corner.x, corner.z)
+      const safeHalfWidth = Math.max(band.halfWidth - 0.45, 0.2)
+
+      if (Math.abs(band.lateralOffset) > safeHalfWidth) {
+        return false
+      }
+    }
+
+    return true
   }
 
   private addRoadPaintCorner(

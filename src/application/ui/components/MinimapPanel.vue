@@ -24,9 +24,11 @@ const props = defineProps<{
 const canvas = ref<HTMLCanvasElement | null>(null)
 const trackCanvas = document.createElement('canvas')
 const startVector = new THREE.Vector3()
+const samplePoint = new THREE.Vector3()
+const sampleTangent = new THREE.Vector3()
 const carPosition = new THREE.Vector3()
 const padding = 22
-const bounds: TrackBounds = props.road.trackBounds
+const bounds: TrackBounds = createMapBounds()
 const spanX = Math.max(bounds.maxX - bounds.minX, 1)
 const spanZ = Math.max(bounds.maxZ - bounds.minZ, 1)
 const mapScale = Math.min(
@@ -90,36 +92,83 @@ function worldToMap(x: number, z: number): MapPoint {
   }
 }
 
-function drawTrack(targetContext: CanvasRenderingContext2D): void {
-  if (props.road.centerline.length <= 1) return
+function createMapBounds(): TrackBounds {
+  const baseBounds = props.road.trackBounds
+  const sampleCount = Math.max(180, Math.ceil(props.road.totalLength / 18))
+  const bounds: TrackBounds = {
+    minX: baseBounds.minX,
+    maxX: baseBounds.maxX,
+    minZ: baseBounds.minZ,
+    maxZ: baseBounds.maxZ,
+  }
 
-  targetContext.lineCap = 'round'
-  targetContext.lineJoin = 'round'
-  strokeCenterline(
-    targetContext,
-    '#8b7d62',
-    (props.road.roadWidth + props.road.shoulderWidth * 2) * mapScale
-  )
-  strokeCenterline(targetContext, '#596067', props.road.roadWidth * mapScale)
+  for (let i = 0; i < sampleCount; i++) {
+    const distance = (i / sampleCount) * props.road.totalLength
+    const halfWidth = props.road.getOuterHalfWidthAtDistance(distance)
+
+    props.road.sampleCenterlineByDistance(distance, samplePoint, sampleTangent)
+    expandBounds(bounds, samplePoint.x - halfWidth, samplePoint.z - halfWidth)
+    expandBounds(bounds, samplePoint.x + halfWidth, samplePoint.z + halfWidth)
+  }
+
+  return bounds
 }
 
-function strokeCenterline(
+function expandBounds(bounds: TrackBounds, x: number, z: number): void {
+  bounds.minX = Math.min(bounds.minX, x)
+  bounds.maxX = Math.max(bounds.maxX, x)
+  bounds.minZ = Math.min(bounds.minZ, z)
+  bounds.maxZ = Math.max(bounds.maxZ, z)
+}
+
+function drawTrack(targetContext: CanvasRenderingContext2D): void {
+  drawTrackRibbon(
+    targetContext,
+    (distance) => props.road.getOuterHalfWidthAtDistance(distance),
+    '#8b7d62'
+  )
+  drawTrackRibbon(
+    targetContext,
+    (distance) => props.road.getTrackHalfWidthAtDistance(distance),
+    '#596067'
+  )
+}
+
+function drawTrackRibbon(
   targetContext: CanvasRenderingContext2D,
-  color: string,
-  lineWidth: number
+  getHalfWidth: (distance: number) => number,
+  color: string
 ): void {
+  const sampleCount = Math.max(220, Math.ceil(props.road.totalLength / 12))
+  const leftEdge: MapPoint[] = []
+  const rightEdge: MapPoint[] = []
+
+  for (let i = 0; i <= sampleCount; i++) {
+    const distance = (i / sampleCount) * props.road.totalLength
+    const halfWidth = getHalfWidth(distance)
+
+    props.road.sampleCenterlineByDistance(distance, samplePoint, sampleTangent)
+
+    const sideX = -sampleTangent.z
+    const sideZ = sampleTangent.x
+
+    leftEdge.push(worldToMap(samplePoint.x + sideX * halfWidth, samplePoint.z + sideZ * halfWidth))
+    rightEdge.push(worldToMap(samplePoint.x - sideX * halfWidth, samplePoint.z - sideZ * halfWidth))
+  }
+
   targetContext.beginPath()
-  props.road.centerline.forEach((point, index) => {
-    const mapPoint = worldToMap(point.x, point.z)
+  leftEdge.forEach((mapPoint, index) => {
     if (index === 0) targetContext.moveTo(mapPoint.x, mapPoint.y)
     else targetContext.lineTo(mapPoint.x, mapPoint.y)
   })
 
-  const firstPoint = worldToMap(props.road.centerline[0].x, props.road.centerline[0].z)
-  targetContext.lineTo(firstPoint.x, firstPoint.y)
-  targetContext.strokeStyle = color
-  targetContext.lineWidth = lineWidth
-  targetContext.stroke()
+  for (let i = rightEdge.length - 1; i >= 0; i--) {
+    targetContext.lineTo(rightEdge[i].x, rightEdge[i].y)
+  }
+
+  targetContext.closePath()
+  targetContext.fillStyle = color
+  targetContext.fill()
 }
 
 function drawStart(targetContext: CanvasRenderingContext2D): void {

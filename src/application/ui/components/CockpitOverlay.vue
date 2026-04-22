@@ -32,7 +32,7 @@ function cockpitClass(): Record<string, boolean> {
 }
 
 function steeringStyle(): Record<string, string> {
-  const wheelAngle = Math.max(-1, Math.min(props.state.steer, 1)) * 118
+  const wheelAngle = -Math.max(-1, Math.min(props.state.steer, 1)) * 118
 
   return {
     transform: `translateX(-50%) rotate(${wheelAngle}deg)`,

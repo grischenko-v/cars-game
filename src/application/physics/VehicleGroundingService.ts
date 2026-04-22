@@ -11,6 +11,7 @@ export interface VehicleGroundingSettings {
   offroadRideHeightBoost: number
   heightSmoothness: number
   minOffroadExtraRideHeight: number
+  visibleSurfaceClearance: number
 }
 
 export type SurfaceSampler = (x: number, z: number) => RoadSurfaceData
@@ -30,13 +31,9 @@ export class VehicleGroundingService {
     const bounds = this.carTemplateFactory.getBounds(view)
     const carPosition = view.copyPosition(this.tmpPosition)
     const surface = this.sampleSurface(carPosition.x, carPosition.z)
-    const surfaceExtraRideHeight = this.getSurfaceExtraRideHeight(surface, extraRideHeight)
 
     view.setY(
-      surface.height -
-        bounds.groundContactY * view.getScaleY() +
-        this.getRideHeightOffset(surface) +
-        surfaceExtraRideHeight
+      this.getSurfaceAlignedY(view, bounds.groundContactY, surface, extraRideHeight)
     )
     view.updateMatrixWorld(true)
 
@@ -65,6 +62,8 @@ export class VehicleGroundingService {
   }
 
   resolveGroundPenetration(view: CarView, extraRideHeight = 0): void {
+    view.updateMatrixWorld(true)
+
     const bounds = this.carTemplateFactory.getBounds(view)
     const centerPosition = view.copyPosition(this.tmpPosition)
     const centerSurface = this.sampleSurface(centerPosition.x, centerPosition.z)
@@ -74,32 +73,44 @@ export class VehicleGroundingService {
     )
     const insetX = Math.max((bounds.maxX - bounds.minX) * 0.12, 0.08)
     const insetZ = Math.max((bounds.maxZ - bounds.minZ) * 0.12, 0.08)
-    const samplePoints: Array<[number, number, number]> = [
-      [0, bounds.groundContactY, 0],
-      [bounds.minX + insetX, bounds.groundContactY, bounds.minZ + insetZ],
-      [bounds.maxX - insetX, bounds.groundContactY, bounds.minZ + insetZ],
-      [bounds.minX + insetX, bounds.groundContactY, bounds.maxZ - insetZ],
-      [bounds.maxX - insetX, bounds.groundContactY, bounds.maxZ - insetZ],
-    ]
-    let maxLift = 0
-
-    for (const [x, y, z] of samplePoints) {
-      view.worldPointFromLocal(x, y, z, this.tmpPoint)
-
-      const surface = this.sampleSurface(this.tmpPoint.x, this.tmpPoint.z)
-      const lift =
-        surface.height +
-        this.getGroundClearance(surface) +
-        this.getSurfaceExtraRideHeight(surface, extraRideHeight) -
-        this.tmpPoint.y
-
-      maxLift = Math.max(maxLift, lift)
-    }
+    const contactY = bounds.groundContactY
+    const maxLift = Math.max(
+      this.getLocalContactLift(view, 0, contactY, 0, extraRideHeight),
+      this.getLocalContactLift(
+        view,
+        bounds.minX + insetX,
+        contactY,
+        bounds.minZ + insetZ,
+        extraRideHeight
+      ),
+      this.getLocalContactLift(
+        view,
+        bounds.maxX - insetX,
+        contactY,
+        bounds.minZ + insetZ,
+        extraRideHeight
+      ),
+      this.getLocalContactLift(
+        view,
+        bounds.minX + insetX,
+        contactY,
+        bounds.maxZ - insetZ,
+        extraRideHeight
+      ),
+      this.getLocalContactLift(
+        view,
+        bounds.maxX - insetX,
+        contactY,
+        bounds.maxZ - insetZ,
+        extraRideHeight
+      )
+    )
 
     if (maxLift > 0) {
       view.translateY(maxLift)
     }
 
+    view.updateMatrixWorld(true)
     this.liftVisualBoundsIfNeeded(view, centerSurface, surfaceExtraRideHeight)
 
     view.worldPointFromLocal(0, bounds.groundContactY, 0, this.tmpPoint)
@@ -112,6 +123,23 @@ export class VehicleGroundingService {
     if (contactLift > 0) {
       view.translateY(contactLift)
     }
+
+    view.updateMatrixWorld(true)
+    this.liftVehicleVisualBoundsAboveSurface(view, extraRideHeight)
+  }
+
+  getSurfaceAlignedY(
+    view: CarView,
+    localContactY: number,
+    surface: RoadSurfaceData,
+    extraRideHeight: number
+  ): number {
+    return (
+      surface.height -
+      localContactY * view.getScaleY() +
+      this.getRideHeightOffset(surface) +
+      this.getSurfaceExtraRideHeight(surface, extraRideHeight)
+    )
   }
 
   getRideHeightOffset(surface: RoadSurfaceData): number {
@@ -127,13 +155,31 @@ export class VehicleGroundingService {
       : this.settings.offroadGroundClearance
   }
 
-  private getSurfaceExtraRideHeight(
+  getSurfaceExtraRideHeight(
     surface: RoadSurfaceData,
     extraRideHeight: number
   ): number {
     return surface.onRoad
       ? extraRideHeight
       : Math.max(extraRideHeight, this.settings.minOffroadExtraRideHeight)
+  }
+
+  private getLocalContactLift(
+    view: CarView,
+    x: number,
+    y: number,
+    z: number,
+    extraRideHeight: number
+  ): number {
+    view.worldPointFromLocal(x, y, z, this.tmpPoint)
+
+    const surface = this.sampleSurface(this.tmpPoint.x, this.tmpPoint.z)
+    return (
+      surface.height +
+      this.getGroundClearance(surface) +
+      this.getSurfaceExtraRideHeight(surface, extraRideHeight) -
+      this.tmpPoint.y
+    )
   }
 
   private liftVisualBoundsIfNeeded(
@@ -154,6 +200,90 @@ export class VehicleGroundingService {
 
     if (visualLift > 0) {
       view.translateY(visualLift)
+    }
+  }
+
+  private liftVehicleVisualBoundsAboveSurface(view: CarView, extraRideHeight = 0): void {
+    view.updateMatrixWorld(true)
+    view.setBoxFromObject(this.tmpBox)
+
+    const minX = this.tmpBox.min.x
+    const midX = (this.tmpBox.min.x + this.tmpBox.max.x) * 0.5
+    const maxX = this.tmpBox.max.x
+    const minZ = this.tmpBox.min.z
+    const midZ = (this.tmpBox.min.z + this.tmpBox.max.z) * 0.5
+    const maxZ = this.tmpBox.max.z
+    let requiredBottomY = -Infinity
+
+    for (let xi = 0; xi < 3; xi++) {
+      const x = xi === 0 ? minX : xi === 1 ? midX : maxX
+
+      for (let zi = 0; zi < 3; zi++) {
+        const z = zi === 0 ? minZ : zi === 1 ? midZ : maxZ
+        const surface = this.sampleSurface(x, z)
+        const surfaceExtra = Math.min(
+          this.getSurfaceExtraRideHeight(surface, extraRideHeight),
+          this.settings.visibleSurfaceClearance
+        )
+
+        requiredBottomY = Math.max(
+          requiredBottomY,
+          surface.height + this.settings.visibleSurfaceClearance + surfaceExtra
+        )
+      }
+    }
+
+    const lift = requiredBottomY - this.tmpBox.min.y
+    if (lift > 0) {
+      view.translateY(lift)
+      view.updateMatrixWorld(true)
+    }
+
+    this.liftVehicleFootprintAboveSurface(view, extraRideHeight)
+  }
+
+  private liftVehicleFootprintAboveSurface(view: CarView, extraRideHeight = 0): void {
+    const bounds = this.carTemplateFactory.getBounds(view)
+    const insetX = Math.max((bounds.maxX - bounds.minX) * 0.1, 0.06)
+    const insetZ = Math.max((bounds.maxZ - bounds.minZ) * 0.1, 0.06)
+    const contactY = bounds.groundContactY
+
+    view.updateMatrixWorld(true)
+
+    const maxLift = Math.max(
+      this.getLocalContactLift(
+        view,
+        bounds.minX + insetX,
+        contactY,
+        bounds.minZ + insetZ,
+        extraRideHeight
+      ),
+      this.getLocalContactLift(
+        view,
+        bounds.maxX - insetX,
+        contactY,
+        bounds.minZ + insetZ,
+        extraRideHeight
+      ),
+      this.getLocalContactLift(
+        view,
+        bounds.minX + insetX,
+        contactY,
+        bounds.maxZ - insetZ,
+        extraRideHeight
+      ),
+      this.getLocalContactLift(
+        view,
+        bounds.maxX - insetX,
+        contactY,
+        bounds.maxZ - insetZ,
+        extraRideHeight
+      )
+    )
+
+    if (maxLift > 0) {
+      view.translateY(maxLift)
+      view.updateMatrixWorld(true)
     }
   }
 }

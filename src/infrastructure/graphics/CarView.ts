@@ -6,6 +6,8 @@ function isMeshObject(child: THREE.Object3D): child is THREE.Mesh {
 }
 
 export class CarView {
+  private headlightRig: THREE.Group | null = null
+
   constructor(private readonly root: THREE.Group) {}
 
   clone(): CarView {
@@ -69,6 +71,11 @@ export class CarView {
         }
       }
     })
+  }
+
+  setHeadlightsEnabled(enabled: boolean): void {
+    const rig = this.getOrCreateHeadlightRig()
+    rig.visible = enabled
   }
 
   copyPosition(out: THREE.Vector3): THREE.Vector3 {
@@ -216,5 +223,39 @@ export class CarView {
     )
 
     return contactCandidates[contactIndex]
+  }
+
+  private getOrCreateHeadlightRig(): THREE.Group {
+    if (this.headlightRig) return this.headlightRig
+
+    const bounds = this.getLocalBounds()
+    const width = bounds ? bounds.max.x - bounds.min.x : 1.8
+    const height = bounds ? bounds.max.y - bounds.min.y : 1.2
+    const frontZ = bounds ? bounds.max.z : 1.6
+    const minY = bounds ? bounds.min.y : 0
+    const headlightY = minY + height * 0.42
+    const headlightX = width * 0.28
+    const rig = new THREE.Group()
+
+    rig.visible = false
+    this.addHeadlight(rig, -headlightX, headlightY, frontZ)
+    this.addHeadlight(rig, headlightX, headlightY, frontZ)
+    this.root.add(rig)
+    this.headlightRig = rig
+
+    return rig
+  }
+
+  private addHeadlight(parent: THREE.Group, x: number, y: number, z: number): void {
+    const light = new THREE.SpotLight(0xfff1c9, 7.5, 72, 0.32, 0.68, 1.2)
+    const target = new THREE.Object3D()
+
+    light.position.set(x, y, z + 0.08)
+    target.position.set(x, y - 0.46, z + 26)
+    light.target = target
+    light.castShadow = false
+
+    parent.add(light)
+    parent.add(target)
   }
 }

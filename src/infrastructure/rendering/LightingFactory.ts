@@ -1,11 +1,34 @@
 import * as THREE from 'three'
 import { qualitySettings } from '../../application/config/QualitySettings'
+import type { EnvironmentPreset } from '../../domain/environment/EnvironmentPreset'
+
+export class SceneLighting {
+  constructor(
+    private readonly ambient: THREE.AmbientLight,
+    private readonly hemisphere: THREE.HemisphereLight,
+    private readonly sun: THREE.DirectionalLight
+  ) {}
+
+  applyPreset(preset: EnvironmentPreset): void {
+    this.ambient.intensity = preset.ambientIntensity
+    this.hemisphere.intensity = preset.hemisphereIntensity
+    this.sun.intensity = preset.sunIntensity
+    this.sun.color.set(preset.sunColor)
+    this.sun.position.set(...preset.sunPosition)
+  }
+}
 
 export class LightingFactory {
-  attachTo(scene: THREE.Scene): void {
-    scene.add(new THREE.AmbientLight(0xffffff, 1.5))
-    scene.add(new THREE.HemisphereLight(0xe5f3ff, 0xb8c19a, 1.4))
-    scene.add(this.createSunLight())
+  attachTo(scene: THREE.Scene): SceneLighting {
+    const ambient = new THREE.AmbientLight(0xffffff, 1.5)
+    const hemisphere = new THREE.HemisphereLight(0xe5f3ff, 0xb8c19a, 1.4)
+    const sun = this.createSunLight()
+
+    scene.add(ambient)
+    scene.add(hemisphere)
+    scene.add(sun)
+
+    return new SceneLighting(ambient, hemisphere, sun)
   }
 
   private createSunLight(): THREE.DirectionalLight {
