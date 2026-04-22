@@ -179,8 +179,7 @@ export class CarView {
     const sideThreshold = width * 0.22
     const axleThreshold = length * 0.16
     const lowerBodyLimit = localBox.min.y + height * 0.58
-    let contactY = Infinity
-    let candidateCount = 0
+    const contactCandidates: number[] = []
 
     this.root.updateMatrixWorld(true)
     rootInverse.copy(this.root.matrixWorld).invert()
@@ -204,11 +203,18 @@ export class CarView {
 
         if (!isSideVertex || !isAxleVertex || !isLowerVertex) continue
 
-        contactY = Math.min(contactY, point.y)
-        candidateCount += 1
+        contactCandidates.push(point.y)
       }
     })
 
-    return candidateCount > 64 ? contactY : null
+    if (contactCandidates.length <= 64) return null
+
+    contactCandidates.sort((a, b) => a - b)
+    const contactIndex = Math.min(
+      contactCandidates.length - 1,
+      Math.floor(contactCandidates.length * 0.08)
+    )
+
+    return contactCandidates[contactIndex]
   }
 }

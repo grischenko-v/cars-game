@@ -115,8 +115,10 @@ const GRASS_VELOCITY_DAMP = 0.985
 const COUNTDOWN_SECONDS = 3
 const COUNTDOWN_GO_HOLD_SECONDS = 0.65
 const OPPONENT_RAIL_HALF_WIDTH_FACTOR = 0.64
-const OPPONENT_RAIL_LATERAL_SPEED = 5.2
-const OPPONENT_RAIL_EMERGENCY_LATERAL_SPEED = 10.5
+const OPPONENT_RAIL_LATERAL_SPEED = 3.8
+const OPPONENT_RAIL_EMERGENCY_LATERAL_SPEED = 8.2
+const CAR_COLLISION_ITERATIONS = 5
+const CAR_COLLISION_SKIN = 0.16
 
 const clock = new THREE.Clock()
 
@@ -134,17 +136,15 @@ const tmpQuatC = new THREE.Quaternion()
 const tmpBox = new THREE.Box3()
 const tmpRollAxis = new THREE.Vector3(0, 0, 1)
 const tmpPitchAxis = new THREE.Vector3(1, 0, 0)
-const surfaceCache = new Map<string, RoadSurfaceData>()
 const competitors: Competitor[] = []
 const competitorById = new Map<string, Competitor>()
 const minimapMarkers: MinimapCarMarker[] = []
 const positionLabelTargets: PositionLabelTarget[] = []
 const standingEntries: StandingEntry[] = []
+const collisionGroundingQueue: Competitor[] = []
 const usedNames = new Set<string>()
 const playerName = nameGenerator.nextName(usedNames)
 const STANDINGS_UPDATE_INTERVAL = 0.12
-const SURFACE_CACHE_SCALE = 4
-const SURFACE_CACHE_LIMIT = 12000
 let standingsUpdateTimer = 0
 let labelUpdateTimer = 0
 let minimapUpdateTimer = 0
@@ -379,30 +379,38 @@ function resolveGroundPenetration(view: CarView, extraRideHeight = 0): void {
 
   const insetX = Math.max((bounds.maxX - bounds.minX) * 0.12, 0.08)
   const insetZ = Math.max((bounds.maxZ - bounds.minZ) * 0.12, 0.08)
-  const samplePoints: Array<[number, number, number]> = [
-    [0, bounds.groundContactY, 0],
-    [bounds.minX + insetX, bounds.groundContactY, bounds.minZ + insetZ],
-    [bounds.maxX - insetX, bounds.groundContactY, bounds.minZ + insetZ],
-    [bounds.minX + insetX, bounds.groundContactY, bounds.maxZ - insetZ],
-    [bounds.maxX - insetX, bounds.groundContactY, bounds.maxZ - insetZ],
-  ]
-
-  let maxLift = 0
-
-  for (const [x, y, z] of samplePoints) {
-    view.worldPointFromLocal(x, y, z, tmpVecE)
-
-    const surface = getVehicleSurfaceAt(tmpVecE.x, tmpVecE.z)
-    const lift =
-      surface.height +
-      getGroundClearance(surface) +
-      getSurfaceExtraRideHeight(surface, extraRideHeight) -
-      tmpVecE.y
-
-    if (lift > maxLift) {
-      maxLift = lift
-    }
-  }
+  const contactY = bounds.groundContactY
+  let maxLift = Math.max(
+    getLocalContactLift(view, 0, contactY, 0, extraRideHeight),
+    getLocalContactLift(
+      view,
+      bounds.minX + insetX,
+      contactY,
+      bounds.minZ + insetZ,
+      extraRideHeight
+    ),
+    getLocalContactLift(
+      view,
+      bounds.maxX - insetX,
+      contactY,
+      bounds.minZ + insetZ,
+      extraRideHeight
+    ),
+    getLocalContactLift(
+      view,
+      bounds.minX + insetX,
+      contactY,
+      bounds.maxZ - insetZ,
+      extraRideHeight
+    ),
+    getLocalContactLift(
+      view,
+      bounds.maxX - insetX,
+      contactY,
+      bounds.maxZ - insetZ,
+      extraRideHeight
+    )
+  )
 
   if (maxLift > 0) {
     view.translateY(maxLift)
@@ -435,16 +443,41 @@ function resolveGroundPenetration(view: CarView, extraRideHeight = 0): void {
   liftVehicleVisualBoundsAboveSurface(view, extraRideHeight)
 }
 
+function getLocalContactLift(
+  view: CarView,
+  x: number,
+  y: number,
+  z: number,
+  extraRideHeight: number
+): number {
+  view.worldPointFromLocal(x, y, z, tmpVecE)
+
+  const surface = getVehicleSurfaceAt(tmpVecE.x, tmpVecE.z)
+  return (
+    surface.height +
+    getGroundClearance(surface) +
+    getSurfaceExtraRideHeight(surface, extraRideHeight) -
+    tmpVecE.y
+  )
+}
+
 function liftVehicleVisualBoundsAboveSurface(view: CarView, extraRideHeight = 0): void {
   view.updateMatrixWorld(true)
   view.setBoxFromObject(tmpBox)
 
-  const sampleXs = [tmpBox.min.x, (tmpBox.min.x + tmpBox.max.x) * 0.5, tmpBox.max.x]
-  const sampleZs = [tmpBox.min.z, (tmpBox.min.z + tmpBox.max.z) * 0.5, tmpBox.max.z]
+  const minX = tmpBox.min.x
+  const midX = (tmpBox.min.x + tmpBox.max.x) * 0.5
+  const maxX = tmpBox.max.x
+  const minZ = tmpBox.min.z
+  const midZ = (tmpBox.min.z + tmpBox.max.z) * 0.5
+  const maxZ = tmpBox.max.z
   let requiredBottomY = -Infinity
 
-  for (const x of sampleXs) {
-    for (const z of sampleZs) {
+  for (let xi = 0; xi < 3; xi++) {
+    const x = xi === 0 ? minX : xi === 1 ? midX : maxX
+
+    for (let zi = 0; zi < 3; zi++) {
+      const z = zi === 0 ? minZ : zi === 1 ? midZ : maxZ
       const surface = getVehicleSurfaceAt(x, z)
       const surfaceExtra = Math.min(
         getSurfaceExtraRideHeight(surface, extraRideHeight),
@@ -471,27 +504,40 @@ function liftVehicleFootprintAboveSurface(view: CarView, extraRideHeight = 0): v
   const bounds = carTemplateFactory.getBounds(view)
   const insetX = Math.max((bounds.maxX - bounds.minX) * 0.1, 0.06)
   const insetZ = Math.max((bounds.maxZ - bounds.minZ) * 0.1, 0.06)
-  const footprintPoints: Array<[number, number, number]> = [
-    [bounds.minX + insetX, bounds.groundContactY, bounds.minZ + insetZ],
-    [bounds.maxX - insetX, bounds.groundContactY, bounds.minZ + insetZ],
-    [bounds.minX + insetX, bounds.groundContactY, bounds.maxZ - insetZ],
-    [bounds.maxX - insetX, bounds.groundContactY, bounds.maxZ - insetZ],
-  ]
-  let maxLift = 0
+  const contactY = bounds.groundContactY
 
   view.updateMatrixWorld(true)
 
-  for (const [x, y, z] of footprintPoints) {
-    view.worldPointFromLocal(x, y, z, tmpVecE)
-    const surface = getVehicleSurfaceAt(tmpVecE.x, tmpVecE.z)
-    const lift =
-      surface.height +
-      getGroundClearance(surface) +
-      getSurfaceExtraRideHeight(surface, extraRideHeight) -
-      tmpVecE.y
-
-    maxLift = Math.max(maxLift, lift)
-  }
+  const maxLift = Math.max(
+    getLocalContactLift(
+      view,
+      bounds.minX + insetX,
+      contactY,
+      bounds.minZ + insetZ,
+      extraRideHeight
+    ),
+    getLocalContactLift(
+      view,
+      bounds.maxX - insetX,
+      contactY,
+      bounds.minZ + insetZ,
+      extraRideHeight
+    ),
+    getLocalContactLift(
+      view,
+      bounds.minX + insetX,
+      contactY,
+      bounds.maxZ - insetZ,
+      extraRideHeight
+    ),
+    getLocalContactLift(
+      view,
+      bounds.maxX - insetX,
+      contactY,
+      bounds.maxZ - insetZ,
+      extraRideHeight
+    )
+  )
 
   if (maxLift > 0) {
     view.translateY(maxLift)
@@ -545,23 +591,6 @@ function resolveObstacleCollisionsFor(view: CarView, car: CarAggregate): void {
       car.resolveCollision(collisionNormal)
     }
   }
-}
-
-function getSurfaceAt(x: number, z: number) {
-  const key = `${Math.round(x * SURFACE_CACHE_SCALE)}:${Math.round(z * SURFACE_CACHE_SCALE)}`
-  const cached = surfaceCache.get(key)
-
-  if (cached) {
-    return cached
-  }
-
-  if (surfaceCache.size > SURFACE_CACHE_LIMIT) {
-    surfaceCache.clear()
-  }
-
-  const surface = road.getHeightAndNormal(x, z, terrain.getHeightAndNormal(x, z))
-  surfaceCache.set(key, surface)
-  return surface
 }
 
 function getVehicleSurfaceAt(x: number, z: number) {
@@ -991,7 +1020,6 @@ function updateOpponents(delta: number): void {
     )
 
     const constrainedRoadBand = applyOpponentRailConstraint(competitor, delta)
-    snapCarToSurface(competitor.view, OPPONENT_SURFACE_CLEARANCE)
     competitor.view.copyPosition(tmpCarPosition)
     const constrainedSurface = getVehicleSurfaceAt(tmpCarPosition.x, tmpCarPosition.z)
     alignCarToSurface(competitor.view, competitor.car, constrainedSurface)
@@ -1042,10 +1070,10 @@ function applyOpponentRailConstraint(competitor: Competitor, delta: number): Roa
 
   const isOffAsphalt = roadBand.distFromRoadCenter > roadBand.halfWidth
   const railFactor = isOffAsphalt
-    ? expLerpFactor(10, delta)
+    ? expLerpFactor(6.5, delta)
     : isOutsideRail
-      ? expLerpFactor(7, delta)
-      : expLerpFactor(2.6, delta)
+      ? expLerpFactor(4.8, delta)
+      : expLerpFactor(1.7, delta)
 
   position.lerp(tmpVecA, railFactor)
   const railSurface = getVehicleSurfaceAt(position.x, position.z)
@@ -1061,9 +1089,11 @@ function applyOpponentRailConstraint(competitor: Competitor, delta: number): Roa
   const headingError =
     THREE.MathUtils.euclideanModulo(targetHeading - car.heading + Math.PI, Math.PI * 2) -
     Math.PI
-  const headingFactor = isOffAsphalt ? 1 : expLerpFactor(isOutsideRail ? 8 : 4.5, delta)
+  const headingFactor = isOffAsphalt
+    ? expLerpFactor(9, delta)
+    : expLerpFactor(isOutsideRail ? 5.5 : 2.8, delta)
   car.setHeading(car.heading + headingError * headingFactor)
-  car.yawVelocity *= isOffAsphalt ? 0.15 : isOutsideRail ? 0.55 : 0.78
+  car.yawVelocity *= isOffAsphalt ? 0.35 : isOutsideRail ? 0.68 : 0.86
 
   const forwardSpeed = Math.max(
     car.speed,
@@ -1074,10 +1104,11 @@ function applyOpponentRailConstraint(competitor: Competitor, delta: number): Roa
   car.speed = forwardSpeed
 
   if (isOffAsphalt || isOutsideRail) {
-    car.velocity.copy(roadBand.tangent).multiplyScalar(forwardSpeed)
+    tmpVecB.copy(roadBand.tangent).multiplyScalar(forwardSpeed)
+    car.velocity.lerp(tmpVecB, expLerpFactor(7, delta))
   } else {
     tmpVecB.copy(roadBand.tangent).multiplyScalar(forwardSpeed)
-    car.velocity.lerp(tmpVecB, expLerpFactor(5, delta))
+    car.velocity.lerp(tmpVecB, expLerpFactor(2.4, delta))
   }
 
   return road.getBandData(position.x, position.z)
@@ -1095,19 +1126,23 @@ function resolveCarCarImpact(
 
   const closingSpeed = tmpVecE.dot(tmpVecC)
   const bothAi = !first.isPlayer && !second.isPlayer
-  const impulse = closingSpeed < 0 ? -closingSpeed * 0.72 + overlap * 0.42 : overlap * 0.32
+  const playerInvolved = first.isPlayer || second.isPlayer
+  const impulse =
+    closingSpeed < 0
+      ? -closingSpeed * (playerInvolved ? 1.05 : 0.82) + overlap * 0.74
+      : overlap * 0.52
 
   first.car.velocity.addScaledVector(tmpVecC, impulse)
   second.car.velocity.addScaledVector(tmpVecC, -impulse)
 
-  if (!bothAi) {
-    first.car.moveSpeedTowardZero((0.7 + overlap * 0.9) * (first.isPlayer ? 0.65 : 1))
-    second.car.moveSpeedTowardZero((0.7 + overlap * 0.9) * (second.isPlayer ? 0.65 : 1))
-  }
+  const speedLoss = 1.2 + overlap * (playerInvolved ? 1.55 : 1.0)
+
+  first.car.moveSpeedTowardZero(speedLoss * (bothAi ? 0.55 : first.isPlayer ? 0.9 : 1.05))
+  second.car.moveSpeedTowardZero(speedLoss * (bothAi ? 0.55 : second.isPlayer ? 0.9 : 1.05))
 }
 
 function resolveCompetitorCollisions(): void {
-  for (let iteration = 0; iteration < 3; iteration++) {
+  for (let iteration = 0; iteration < CAR_COLLISION_ITERATIONS; iteration++) {
     for (let i = 0; i < competitors.length; i++) {
       for (let j = i + 1; j < competitors.length; j++) {
         const first = competitors[i]
@@ -1118,7 +1153,9 @@ function resolveCompetitorCollisions(): void {
         const dz = firstPosition.z - secondPosition.z
         const distSq = dx * dx + dz * dz
         const minDist =
-          carTemplateFactory.getBounds(first.view).colliderRadius + carTemplateFactory.getBounds(second.view).colliderRadius
+          carTemplateFactory.getBounds(first.view).colliderRadius +
+          carTemplateFactory.getBounds(second.view).colliderRadius +
+          CAR_COLLISION_SKIN
 
         if (distSq >= minDist * minDist) continue
 
@@ -1126,10 +1163,17 @@ function resolveCompetitorCollisions(): void {
         const nx = dx / dist
         const nz = dz / dist
         const overlap = minDist - dist
-        const pushOut = overlap * 0.62 + 0.02
+        const playerInvolved = first.isPlayer || second.isPlayer
+        const firstShare = second.isPlayer ? 0.72 : first.isPlayer ? 0.28 : 0.5
+        const secondShare = 1 - firstShare
+        const pushOut = overlap + (playerInvolved ? 0.08 : 0.03)
 
-        first.view.translateXZ(nx * pushOut, nz * pushOut)
-        second.view.translateXZ(-nx * pushOut, -nz * pushOut)
+        first.view.translateXZ(nx * pushOut * firstShare, nz * pushOut * firstShare)
+        second.view.translateXZ(-nx * pushOut * secondShare, -nz * pushOut * secondShare)
+        queueCollisionGrounding(first)
+        queueCollisionGrounding(second)
+        syncOpponentRailOffset(first)
+        syncOpponentRailOffset(second)
 
         resolveCarCarImpact(first, second, nx, nz, overlap)
 
@@ -1146,6 +1190,8 @@ function resolveCompetitorCollisions(): void {
             -tmpVecE.x * sidePush * firstSide,
             -tmpVecE.z * sidePush * firstSide
           )
+          queueCollisionGrounding(first)
+          queueCollisionGrounding(second)
           resolveCarCarImpact(first, second, nx, nz, overlap * 1.25)
         }
       }
@@ -1153,8 +1199,26 @@ function resolveCompetitorCollisions(): void {
   }
 }
 
-function snapCompetitorsToSurface(): void {
-  for (const competitor of competitors) {
+function syncOpponentRailOffset(competitor: Competitor): void {
+  if (competitor.isPlayer) return
+
+  competitor.view.copyPosition(tmpCarPosition)
+  competitor.railLateralOffset = road.getBandData(
+    tmpCarPosition.x,
+    tmpCarPosition.z
+  ).lateralOffset
+}
+
+function queueCollisionGrounding(competitor: Competitor): void {
+  if (collisionGroundingQueue.includes(competitor)) return
+
+  collisionGroundingQueue.push(competitor)
+}
+
+function snapCollisionMovedCompetitorsToSurface(): void {
+  if (collisionGroundingQueue.length === 0) return
+
+  for (const competitor of collisionGroundingQueue) {
     const extraRideHeight = competitor.isPlayer ? 0 : OPPONENT_POST_COLLISION_RIDE_HEIGHT_EXTRA
 
     snapCarToSurface(competitor.view, extraRideHeight)
@@ -1168,6 +1232,8 @@ function snapCompetitorsToSurface(): void {
     )
     resolveGroundPenetration(competitor.view, extraRideHeight)
   }
+
+  collisionGroundingQueue.length = 0
 }
 
 function getMinimapMarkers() {
@@ -1242,7 +1308,7 @@ function animate(): void {
   updateDrive(delta)
   updateOpponents(delta)
   resolveCompetitorCollisions()
-  snapCompetitorsToSurface()
+  snapCollisionMovedCompetitorsToSurface()
   updateCompetitionUi(delta)
   skidTrail.update(carView, carAggregate, keys, road, terrain)
   cameraRig.update(carView, carAggregate.heading, carAggregate.speed, delta)

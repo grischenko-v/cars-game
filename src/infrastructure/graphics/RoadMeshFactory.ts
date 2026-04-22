@@ -26,10 +26,20 @@ export class RoadMeshFactory {
       track.outerHalfWidth + track.apronWidth + 12,
       track.apronY - 0.08
     )
+    const grassBackfillTextures = loadRepeatingPbrTextures(
+      '/textures/grass',
+      'Grass001_1K-JPG',
+      Math.max(track.totalLength / 28, 1),
+      2.4
+    )
     const terrainBackfillMaterial = new THREE.MeshStandardMaterial({
-      color: 0xb7c991,
+      color: 0xf2ffe2,
+      map: grassBackfillTextures.map,
+      normalMap: grassBackfillTextures.normalMap,
+      roughnessMap: grassBackfillTextures.roughnessMap,
       roughness: 1,
       metalness: 0,
+      normalScale: new THREE.Vector2(0.22, 0.22),
       side: THREE.DoubleSide,
       polygonOffset: true,
       polygonOffsetFactor: 8,
@@ -65,6 +75,7 @@ export class RoadMeshFactory {
       Math.max(track.totalLength / 18, 1),
       1.8
     )
+    const asphaltPatchAlpha = this.createSoftRectAlphaMap('soft-asphalt-patch-alpha')
     const roadMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: asphaltTextures.map,
@@ -122,6 +133,9 @@ export class RoadMeshFactory {
         roughnessMap: asphaltTextures.roughnessMap,
         roughness: 0.98,
         metalness: 0.01,
+        alphaMap: asphaltPatchAlpha,
+        transparent: true,
+        opacity: 0.58,
         normalScale: new THREE.Vector2(0.24, 0.24),
         side: THREE.DoubleSide,
         depthWrite: false,
@@ -133,7 +147,11 @@ export class RoadMeshFactory {
     asphaltRepairs.frustumCulled = false
     asphaltRepairs.receiveShadow = true
     asphaltRepairs.renderOrder = 6
-    const asphaltVariationMeshes = this.buildAsphaltVariationMeshes(track, asphaltTextures)
+    const asphaltVariationMeshes = this.buildAsphaltVariationMeshes(
+      track,
+      asphaltTextures,
+      asphaltPatchAlpha
+    )
     const asphaltWear = new THREE.Mesh(
       this.buildAsphaltWearGeometry(track),
       new THREE.MeshBasicMaterial({
@@ -733,12 +751,14 @@ export class RoadMeshFactory {
 
   private buildAsphaltVariationMeshes(
     track: TrackModel,
-    asphaltTextures: PbrTextureSet
+    asphaltTextures: PbrTextureSet,
+    alphaMap: THREE.Texture
   ): THREE.Mesh[] {
     return [
       this.createAsphaltVariationMesh(
         track,
         asphaltTextures,
+        alphaMap,
         {
           color: 0x565d59,
           normalScale: 0.16,
@@ -749,12 +769,13 @@ export class RoadMeshFactory {
           maxLength: 44,
           minWidthFactor: 0.28,
           maxWidthFactor: 0.72,
-          opacity: 1,
+          opacity: 0.42,
         }
       ),
       this.createAsphaltVariationMesh(
         track,
         asphaltTextures,
+        alphaMap,
         {
           color: 0x343a39,
           normalScale: 0.28,
@@ -765,12 +786,13 @@ export class RoadMeshFactory {
           maxLength: 78,
           minWidthFactor: 0.42,
           maxWidthFactor: 1.08,
-          opacity: 1,
+          opacity: 0.34,
         }
       ),
       this.createAsphaltVariationMesh(
         track,
         asphaltTextures,
+        alphaMap,
         {
           color: 0x777468,
           normalScale: 0.1,
@@ -781,7 +803,7 @@ export class RoadMeshFactory {
           maxLength: 56,
           minWidthFactor: 0.22,
           maxWidthFactor: 0.54,
-          opacity: 1,
+          opacity: 0.28,
         }
       ),
     ]
@@ -790,6 +812,7 @@ export class RoadMeshFactory {
   private createAsphaltVariationMesh(
     track: TrackModel,
     asphaltTextures: PbrTextureSet,
+    alphaMap: THREE.Texture,
     options: {
       color: number
       normalScale: number
@@ -809,11 +832,12 @@ export class RoadMeshFactory {
       map: asphaltTextures.map,
       normalMap: asphaltTextures.normalMap,
       roughnessMap: asphaltTextures.roughnessMap,
+      alphaMap,
       roughness: options.roughness,
       metalness: 0.01,
       normalScale: new THREE.Vector2(options.normalScale, options.normalScale),
       side: THREE.DoubleSide,
-      transparent: false,
+      transparent: true,
       opacity: options.opacity,
       depthWrite: false,
       polygonOffset: true,
@@ -826,6 +850,44 @@ export class RoadMeshFactory {
     mesh.renderOrder = 6
 
     return mesh
+  }
+
+  private createSoftRectAlphaMap(name: string): THREE.CanvasTexture {
+    const size = 128
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error(`Unable to create ${name}`)
+    }
+
+    const imageData = context.createImageData(size, size)
+    const edgeFade = 0.18
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = (x + 0.5) / size
+        const v = (y + 0.5) / size
+        const edgeDistance = Math.min(u, v, 1 - u, 1 - v)
+        const alpha = THREE.MathUtils.smoothstep(edgeDistance / edgeFade, 0, 1)
+        const value = Math.round(alpha * 255)
+        const index = (y * size + x) * 4
+
+        imageData.data[index] = value
+        imageData.data[index + 1] = value
+        imageData.data[index + 2] = value
+        imageData.data[index + 3] = 255
+      }
+    }
+
+    context.putImageData(imageData, 0, 0)
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.name = name
+    texture.needsUpdate = true
+    return texture
   }
 
   private buildAsphaltPatchGeometry(

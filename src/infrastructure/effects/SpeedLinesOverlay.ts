@@ -10,6 +10,9 @@ export class SpeedLinesOverlay {
   private pixelRatio = 1
   private hasVisibleFrame = false
   private drawTimer = 0
+  private styleTimer = 0
+  private lastBackdropFilter = ''
+  private lastMask = ''
 
   constructor(private readonly parent: HTMLElement = document.body) {
     const canvas = document.createElement('canvas')
@@ -42,27 +45,22 @@ export class SpeedLinesOverlay {
       targetIntensity,
       expLerpFactor(5.5, delta)
     )
-    const blur = this.intensity * 8
-    const clearRadius = 42 - this.intensity * 14
-    const softRadius = 62 - this.intensity * 10
-    const mask = `radial-gradient(circle at 50% 48%, transparent 0 ${clearRadius}%, rgba(0,0,0,0.35) ${softRadius}%, black 100%)`
-    this.canvas.style.backdropFilter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : ''
-    this.canvas.style.setProperty('-webkit-backdrop-filter', this.canvas.style.backdropFilter)
-    this.canvas.style.maskImage = mask
-    this.canvas.style.setProperty('-webkit-mask-image', mask)
     this.drawTimer -= delta
+    this.styleTimer -= delta
 
     if (this.intensity < 0.015 && targetIntensity < 0.015) {
       if (this.hasVisibleFrame) {
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height)
-        this.canvas.style.backdropFilter = ''
-        this.canvas.style.removeProperty('-webkit-backdrop-filter')
-        this.canvas.style.maskImage = ''
-        this.canvas.style.removeProperty('-webkit-mask-image')
+        this.clearFocusStyle()
         this.hasVisibleFrame = false
       }
 
       return
+    }
+
+    if (this.styleTimer <= 0) {
+      this.styleTimer = 1 / 30
+      this.updateFocusStyle()
     }
 
     if (this.drawTimer > 0) return
@@ -133,6 +131,37 @@ export class SpeedLinesOverlay {
     this.canvas.height = Math.floor(window.innerHeight * this.pixelRatio)
     this.canvas.style.width = `${window.innerWidth}px`
     this.canvas.style.height = `${window.innerHeight}px`
+  }
+
+  private updateFocusStyle(): void {
+    const blur = this.intensity * 8
+    const clearRadius = 42 - this.intensity * 14
+    const softRadius = 62 - this.intensity * 10
+    const backdropFilter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : ''
+    const mask = `radial-gradient(circle at 50% 48%, transparent 0 ${clearRadius.toFixed(
+      1
+    )}%, rgba(0,0,0,0.35) ${softRadius.toFixed(1)}%, black 100%)`
+
+    if (this.lastBackdropFilter !== backdropFilter) {
+      this.canvas.style.backdropFilter = backdropFilter
+      this.canvas.style.setProperty('-webkit-backdrop-filter', backdropFilter)
+      this.lastBackdropFilter = backdropFilter
+    }
+
+    if (this.lastMask !== mask) {
+      this.canvas.style.maskImage = mask
+      this.canvas.style.setProperty('-webkit-mask-image', mask)
+      this.lastMask = mask
+    }
+  }
+
+  private clearFocusStyle(): void {
+    this.canvas.style.backdropFilter = ''
+    this.canvas.style.removeProperty('-webkit-backdrop-filter')
+    this.canvas.style.maskImage = ''
+    this.canvas.style.removeProperty('-webkit-mask-image')
+    this.lastBackdropFilter = ''
+    this.lastMask = ''
   }
 
   private readonly handleResize = (): void => {

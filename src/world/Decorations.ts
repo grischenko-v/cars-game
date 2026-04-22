@@ -163,7 +163,7 @@ export class Decorations {
   addGroundPatch(x: number, z: number, variant: number): void {
     this.groundPatchInstances.push({
       x,
-      y: this.terrain.height(x, z) + 0.006,
+      y: this.terrain.height(x, z) + 0.028,
       z,
       scaleX: this.randomRange(5, 15),
       scaleZ: this.randomRange(3, 9),
@@ -642,17 +642,27 @@ export class Decorations {
     const dirtPatches = this.groundPatchInstances.filter((patch) => patch.variant === 1)
     const patchGeometry = new THREE.CircleGeometry(1, 28)
     patchGeometry.rotateX(-Math.PI / 2)
+    const softPatchAlpha = this.createSoftGroundPatchAlphaMap()
+    const sandTextures = loadRepeatingPbrTextures('/textures/sand', 'Ground054_1K-JPG', 2.8, 2.8)
 
     this.addGroundPatchInstancedMesh(
       patchGeometry,
       new THREE.MeshStandardMaterial({
-        color: 0xc8b985,
+        color: 0xf2d59a,
+        map: sandTextures.map,
+        normalMap: sandTextures.normalMap,
+        roughnessMap: sandTextures.roughnessMap,
+        alphaMap: softPatchAlpha,
+        transparent: true,
+        opacity: 0.86,
+        alphaTest: 0.02,
         roughness: 1,
         metalness: 0,
-        depthWrite: true,
+        normalScale: new THREE.Vector2(0.22, 0.22),
+        depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       }),
       sandPatches
     )
@@ -660,15 +670,57 @@ export class Decorations {
       patchGeometry,
       new THREE.MeshStandardMaterial({
         color: 0x8f7c5e,
+        alphaMap: softPatchAlpha,
+        transparent: true,
+        opacity: 0.8,
+        alphaTest: 0.02,
         roughness: 1,
         metalness: 0,
-        depthWrite: true,
+        depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       }),
       dirtPatches
     )
+  }
+
+  private createSoftGroundPatchAlphaMap(): THREE.CanvasTexture {
+    const size = 128
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      throw new Error('Unable to create ground patch alpha map')
+    }
+
+    const imageData = context.createImageData(size, size)
+    const half = size / 2
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = (x + 0.5 - half) / half
+        const dy = (y + 0.5 - half) / half
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        const alpha = 1 - THREE.MathUtils.smoothstep(distance, 0.58, 1)
+        const value = Math.round(alpha * 255)
+        const index = (y * size + x) * 4
+
+        imageData.data[index] = value
+        imageData.data[index + 1] = value
+        imageData.data[index + 2] = value
+        imageData.data[index + 3] = 255
+      }
+    }
+
+    context.putImageData(imageData, 0, 0)
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.name = 'soft-ground-patch-alpha'
+    texture.needsUpdate = true
+    return texture
   }
 
   private addInstancedPart(
@@ -738,6 +790,7 @@ export class Decorations {
     mesh.castShadow = false
     mesh.receiveShadow = true
     mesh.frustumCulled = true
+    mesh.renderOrder = -8
 
     instances.forEach((instance, index) => {
       center.x += instance.x

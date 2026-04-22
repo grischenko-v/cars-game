@@ -125,18 +125,24 @@ export class CarTemplateFactory {
 
   private createPhysicsBounds(
     localBox: THREE.Box3,
-    _groundContactY: number
+    wheelContactY: number
   ): CarPhysicsBounds {
     const width = localBox.max.x - localBox.min.x
     const length = localBox.max.z - localBox.min.z
+    const height = localBox.max.y - localBox.min.y
+    const hasReliableWheelContact =
+      Number.isFinite(wheelContactY) &&
+      wheelContactY >= localBox.min.y &&
+      wheelContactY <= localBox.min.y + height * 0.34
+
     return {
       minY: localBox.min.y,
-      groundContactY: localBox.min.y,
+      groundContactY: hasReliableWheelContact ? wheelContactY : localBox.min.y,
       minX: localBox.min.x,
       maxX: localBox.max.x,
       minZ: localBox.min.z,
       maxZ: localBox.max.z,
-      colliderRadius: THREE.MathUtils.clamp(width * 0.58 + length * 0.05, 0.92, 1.24),
+      colliderRadius: THREE.MathUtils.clamp(width * 0.62 + length * 0.18, 1.25, 1.85),
     }
   }
 }
