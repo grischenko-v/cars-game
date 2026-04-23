@@ -247,11 +247,11 @@ export class CarView {
   }
 
   private addHeadlight(parent: THREE.Group, x: number, y: number, z: number): void {
-    const light = new THREE.SpotLight(0xfff1c9, 7.5, 72, 0.32, 0.68, 1.2)
+    const light = new THREE.SpotLight(0xfff1c9, 11.5, 96, 0.38, 0.78, 1.05)
     const target = new THREE.Object3D()
 
     light.position.set(x, y, z + 0.08)
-    target.position.set(x, y - 0.46, z + 26)
+    target.position.set(x, y - 0.58, z + 34)
     light.target = target
     light.castShadow = false
 

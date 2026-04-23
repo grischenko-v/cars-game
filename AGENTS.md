@@ -72,6 +72,8 @@ The app renders a drivable car with a follow/target camera, analog instruments, 
     /environment
       EnvironmentPreset.ts
       EnvironmentPresetFactory.ts
+      TerrainProfile.ts
+      TerrainProfileFactory.ts
     /road
       TrackModel.ts
       TrackGenerationStrategy.ts
@@ -107,6 +109,8 @@ The app renders a drivable car with a follow/target camera, analog instruments, 
     Road.ts
     Terrain.ts
     Decorations.ts
+    WaterFeatures.ts
+    RockFeatures.ts
 
 index.html
 package.json
@@ -144,6 +148,7 @@ tsconfig.json
 - `src/infrastructure/graphics/CarView.ts` is the adapter/facade around the loaded `THREE.Group`. Do not access `THREE.Object3D.position` for the car directly from `main.ts`; use `CarView` methods such as `copyPosition`, `setPosition`, `translateXZ`, and `addScaledVector`.
 - `src/world/Road.ts` is a facade over the road domain model, generation strategy, and mesh factory. Keep public road queries here, but put generation rules into `src/domain/road/` and Three.js mesh construction into `src/infrastructure/graphics/`.
 - `src/domain/road/TrackModel.ts` contains road domain queries such as closest band data, start sector checks, surface data, and banking height/normal calculations.
+- `src/domain/environment/TerrainProfileFactory.ts` randomly selects the terrain relief profile (`plain`, `hills`, `mountains`) and binds each profile to height parameters and a matching local PBR texture set.
 - `src/domain/road/TrackGenerationStrategy.ts` is the Strategy interface for road generation. `RandomClosedLoopTrackStrategy.ts` currently targets a random closed loop with roughly `3..10` left turns and `3..10` right turns. It also injects racing features into the generated centerline: hairpins, chicanes, double-apex corners, banked corners, and S-curves. Keep those feature rules in the generation strategy rather than hardcoding one-off track shapes in `main.ts`.
 - `src/domain/race/Race.ts` tracks lap timing/progress for one participant. Use one `Race` instance per car when adding opponents.
 - `src/domain/race/RaceStandings.ts` ranks participants by finished state and race distance; keep leaderboard sorting rules there.
@@ -151,8 +156,10 @@ tsconfig.json
 - `src/infrastructure/graphics/VehicleAssetCatalog.ts` binds domain vehicle specs to concrete GLB asset paths.
 - `src/infrastructure/graphics/CarTemplateFactory.ts` loads GLB vehicle templates from the asset catalog, normalizes real-world size, prepares per-model physics bounds, and clones `CarView` instances. Keep GLTF loading, model centering, and per-view bounds maps here rather than in `main.ts`.
 - `src/infrastructure/graphics/RoadMeshFactory.ts` builds road/shoulder/apron/lane meshes, variable `1..6` lane markings, smooth asphalt width transitions, the start grid, layered asphalt patch textures, asphalt repair/wear/crack overlays, continuous guardrails, and road signs. Lane markings must use the same effective lane count and dynamic road width as `TrackModel`: edge lines are continuous white strips, internal lane dividers are dashed, and internal dashes should be skipped on widening/narrowing tapers. Shoulder and apron geometry must stay as outer side bands only, not full-width strips over the asphalt. The road surface must stay opaque with depth writing enabled; grass/sand should visually meet the asphalt edge through height separation and backfill bands, not by making asphalt transparent. The road surface may use `THREE.DoubleSide` because procedural winding can flip on some loops, but shoulder/apron should prefer `THREE.FrontSide`. To reduce edge shimmer, keep `roadY`, `shoulderY`, and `apronY` separated; road, shoulder, and apron should still receive shadows so cars feel grounded. Road ribbons should be built from dense distance samples, not only raw centerline vertices, so curves and lane-width transitions do not create long triangles. Asphalt decorative rectangles should be skipped if their corners do not fit inside the current asphalt width; do not clamp oversized patches into warped triangles over grass.
-- `src/world/Terrain.ts` contains terrain height generation and terrain smoothing/cutout around the road. Keep the terrain mesh continuous so sky cannot show through near the road. Grass/asphalt conflicts should be solved with road depth settings, road/terrain height separation, and the narrow road-edge backfill mesh, not by deleting terrain triangles under the road.
+- `src/world/Terrain.ts` contains terrain height generation and terrain smoothing/cutout around the road. It receives a `TerrainProfile` so plains, hills, and mountains can vary height and texture without branching in `RacingGame.ts`. Hill and mountain profiles may add roadside cliff influence, but cliffs must keep a safe distance from asphalt and use smooth ramps. Keep the terrain mesh continuous so sky cannot show through near the road. Grass/asphalt conflicts should be solved with road depth settings, road/terrain height separation, and the narrow road-edge backfill mesh, not by deleting terrain triangles under the road.
 - `src/world/Decorations.ts` contains trees, houses, and obstacle collider generation. Decorations are rendered with chunked `THREE.InstancedMesh` batches and use `SpatialHashGrid` for placement/collision lookup; avoid returning to per-tree/per-house Mesh groups unless debugging.
+- `src/world/WaterFeatures.ts` owns visual lakes, rivers, and bridge decks. It must always create exactly one asphalt bridge on a stable road section, with a river underneath and low curbs along the sides. Keep water/bridge scenic generation there instead of adding geometry in `RacingGame.ts`; if bridges become collidable later, register their obstacle shapes alongside water generation.
+- `src/world/RockFeatures.ts` owns large scenic rock formations and roadside cliff clusters. Keep them instanced, outside the asphalt/shoulder clearance, and tied to the current `TerrainProfile` so mountains/hills get real scale while plains stay sparse.
 - `src/utils/math.ts` contains shared math helpers used by gameplay code.
 
 ## 🧩 DDD / GoF Patterns
@@ -170,6 +177,7 @@ tsconfig.json
 - State Model: `GamePhase` names the application lifecycle states used by loading, countdown, racing, and finish flows.
 - Controller: `CountdownController` owns transitions between loading/countdown/running/finished without spreading phase timers through the game loop.
 - Preset Factory: `EnvironmentPresetFactory` randomly selects weather (`sunny`, `partly-cloudy`, `overcast`, `drizzle`, `rain`, `storm`) and time of day (`morning`, `day`, `evening`, `night`) and maps them to pure rendering/light parameters.
+- Preset Factory: `TerrainProfileFactory` randomly selects relief (`plain`, `hills`, `mountains`) and maps it to pure height/material parameters.
 - Controller: `EnvironmentController` applies the selected preset to renderer, lighting, and weather effects.
 - Value Object / Profile: `OpponentProfile` describes AI participant tuning and start-grid placement without owning Three.js objects.
 - Registry: `CompetitorRegistry` collects race participants and prepares UI/minimap read models without exposing maps and mutable arrays from the game loop.
@@ -195,6 +203,8 @@ tsconfig.json
 - Off-road surface balance is gameplay-critical: grass/dirt should cap speed at roughly `75%` of asphalt and sand patches at roughly `65%`. `Decorations.getGroundSurfaceAt()` feeds this into `SurfaceSpeedPolicy`.
 - Cars use extra off-road ride height/ground clearance so grass, sand, and dirt decals do not visually swallow the model. Keep this off-road-only; do not globally raise road ride height unless the car visibly floats on asphalt.
 - Weather and time of day are randomized at game start through `EnvironmentPresetFactory`. Night and rain require headlights; use `CarView.setHeadlightsEnabled()` for all participant cars instead of adding ad-hoc lights from `RacingGame.ts`.
+- Headlights are part of `CarView`: they should be visible only as light cast onto the road, not as glowing sphere meshes. If night asphalt is unreadable, tune the `SpotLight` distance/angle/intensity there rather than creating extra scene-level lights.
+- Terrain relief is randomized at game start through `TerrainProfileFactory`. Plains use grass, hills use darker grass, and mountains use the existing sand/ground PBR set with a rock-like tint until a dedicated rock texture set is added. Hill and mountain profiles should feel visibly taller than plains and can occasionally place the road alongside cliff-like terrain.
 - HUD instruments are analog Vue-rendered gauges. Keep speed/RPM presentation in `HudPanel.vue` and `HudPanel.css`; `HudView.ts` should only push state from the game loop.
 - The road is now generated as a long closed random loop with multiple straights and turns. Prefer longer straights, smoother corners, and fewer noisy micro-turns, so decoration placement should query the road shape rather than assume an oval. If track scale grows, keep `Terrain.size` large enough to cover the whole generated road.
 - When changing road height or width, also review the terrain cut parameters in `Road.ts`/`Terrain.ts`; otherwise asphalt can visually sink into the grass again.

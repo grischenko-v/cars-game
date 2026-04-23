@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { qualitySettings } from '../application/config/QualitySettings'
+import type { TerrainProfile } from '../domain/environment/TerrainProfile'
 import { loadRepeatingPbrTextures } from '../infrastructure/graphics/TextureFactory'
 import { clamp } from '../utils/math'
 import type { Road } from './Road'
@@ -12,7 +13,11 @@ export class Terrain {
   material: THREE.MeshStandardMaterial
   mesh: THREE.Mesh
 
-  constructor(scene: THREE.Scene, road: Road) {
+  constructor(
+    scene: THREE.Scene,
+    road: Road,
+    private readonly profile: TerrainProfile
+  ) {
     this.road = road
 
     this.geometry = new THREE.PlaneGeometry(
@@ -31,21 +36,24 @@ export class Terrain {
     }
     this.geometry.computeVertexNormals()
 
-    const grassTextures = loadRepeatingPbrTextures(
-      '/textures/grass',
-      'Grass001_1K-JPG',
-      118,
-      118
+    const terrainTextures = loadRepeatingPbrTextures(
+      this.profile.texture.basePath,
+      this.profile.texture.name,
+      this.profile.texture.repeatX,
+      this.profile.texture.repeatY
     )
 
     this.material = new THREE.MeshStandardMaterial({
-      color: 0xb7c991,
-      map: grassTextures.map,
-      normalMap: grassTextures.normalMap,
-      roughnessMap: grassTextures.roughnessMap,
+      color: this.profile.texture.color,
+      map: terrainTextures.map,
+      normalMap: terrainTextures.normalMap,
+      roughnessMap: terrainTextures.roughnessMap,
       roughness: 1,
       metalness: 0,
-      normalScale: new THREE.Vector2(0.38, 0.38),
+      normalScale: new THREE.Vector2(
+        this.profile.texture.normalScale,
+        this.profile.texture.normalScale
+      ),
       polygonOffset: true,
       polygonOffsetFactor: 18,
       polygonOffsetUnits: 18,
@@ -58,11 +66,18 @@ export class Terrain {
   }
 
   rawHeight(x: number, z: number): number {
-    return (
-      Math.sin(x * 0.025) * 0.9 +
-      Math.cos(z * 0.022) * 0.8 +
-      Math.sin((x + z) * 0.015) * 0.6
-    ) * 0.35
+    const rolling =
+      Math.sin(x * this.profile.primaryFrequency) * 0.9 +
+      Math.cos(z * this.profile.secondaryFrequency) * 0.8 +
+      Math.sin((x + z) * this.profile.detailFrequency) * 0.42
+    const ridgeWave =
+      Math.sin((x + z * 0.42) * this.profile.ridgeFrequency) * 0.5 +
+      Math.cos((z - x * 0.28) * this.profile.ridgeFrequency * 1.28) * 0.5
+    const ridge =
+      Math.pow(Math.abs(ridgeWave), 1.8) *
+      this.profile.ridgeAmplitude
+
+    return rolling * this.profile.heightAmplitude + ridge
   }
 
   height(x: number, z: number): number {
@@ -77,7 +92,8 @@ export class Terrain {
       1,
       THREE.MathUtils.smoothstep(calmT, 0, 1)
     )
-    const baseHeight = this.rawHeight(x, z) * calmFactor
+    const baseHeight =
+      (this.rawHeight(x, z) + this.roadsideReliefHeight(roadBand)) * calmFactor
     const roadEdgeOffset = clamp(
       roadBand.lateralOffset,
       -roadBand.halfWidth,
@@ -150,6 +166,48 @@ export class Terrain {
     }
 
     return baseHeight
+  }
+
+  private roadsideReliefHeight(roadBand: {
+    distanceAlong: number
+    distFromRoadCenter: number
+    halfWidth: number
+    lateralOffset: number
+  }): number {
+    if (this.profile.roadsideCliffAmplitude <= 0) return 0
+
+    const sideSign = Math.sign(roadBand.lateralOffset || 1)
+    const preferredSide = Math.sin(roadBand.distanceAlong * 0.0028) >= 0 ? 1 : -1
+
+    if (sideSign !== preferredSide) return 0
+
+    const cliffWave =
+      Math.sin(roadBand.distanceAlong * this.profile.roadsideCliffFrequency) * 0.5 +
+      Math.sin(roadBand.distanceAlong * this.profile.roadsideCliffFrequency * 1.73 + 1.9) * 0.5
+    const cliffMask = THREE.MathUtils.smoothstep(
+      Math.abs(cliffWave),
+      this.profile.roadsideCliffThreshold,
+      1
+    )
+
+    if (cliffMask <= 0) return 0
+
+    const safeStart = roadBand.halfWidth + 24
+    const rampDistance = 92
+    const lateralT = clamp(
+      (roadBand.distFromRoadCenter - safeStart) / rampDistance,
+      0,
+      1
+    )
+    const shoulderMask = THREE.MathUtils.smoothstep(lateralT, 0, 1)
+    const layeredSlope =
+      0.72 +
+      Math.pow(
+        Math.abs(Math.sin(roadBand.distanceAlong * 0.011 + roadBand.distFromRoadCenter * 0.018)),
+        1.6
+      ) * 0.52
+
+    return this.profile.roadsideCliffAmplitude * cliffMask * shoulderMask * layeredSlope
   }
 
   getHeightAndNormal(x: number, z: number): { height: number; normal: THREE.Vector3 } {

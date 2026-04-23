@@ -48,6 +48,7 @@ import {
 import { CountdownController } from './CountdownController'
 import { Car as CarAggregate } from '../../domain/car/Car'
 import { EnvironmentPresetFactory } from '../../domain/environment/EnvironmentPresetFactory'
+import { TerrainProfileFactory } from '../../domain/environment/TerrainProfileFactory'
 import { Race } from '../../domain/race/Race'
 import {
   getStartGridSlot,
@@ -90,6 +91,8 @@ import { NameGenerator } from '../../domain/race/NameGenerator'
 import { Road } from '../../world/Road'
 import { Terrain } from '../../world/Terrain'
 import { Decorations } from '../../world/Decorations'
+import { WaterFeatures } from '../../world/WaterFeatures'
+import { RockFeatures } from '../../world/RockFeatures'
 import { RaceStandings } from '../../domain/race/RaceStandings'
 
 export function startRacingGame(): void {
@@ -106,6 +109,7 @@ const keyboardInput = new KeyboardInput()
 const keys = keyboardInput.keys
 const lighting = new LightingFactory().attachTo(scene)
 const environmentPreset = new EnvironmentPresetFactory().createRandom()
+const terrainProfile = new TerrainProfileFactory().createRandom()
 const rainEffect = new RainEffect(scene, camera)
 const sunDisc = new SunDisc(scene, camera)
 const environmentController = new EnvironmentController(
@@ -120,8 +124,10 @@ const road = new Road()
 const race = new Race(TARGET_LAPS, road.startAngle, road.totalLength)
 const raceStandings = new RaceStandings()
 const nameGenerator = new NameGenerator()
-const terrain = new Terrain(scene, road)
+const terrain = new Terrain(scene, road, terrainProfile)
 road.attachTo(scene)
+new WaterFeatures(scene, terrain, road, terrainProfile)
+new RockFeatures(scene, terrain, road, terrainProfile)
 const decorations = new Decorations(scene, terrain, road)
 const surfaceSpeedPolicy = new SurfaceSpeedPolicy(
   (x, z) => decorations.getGroundSurfaceAt(x, z),
