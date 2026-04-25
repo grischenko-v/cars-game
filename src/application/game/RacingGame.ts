@@ -126,7 +126,7 @@ const raceStandings = new RaceStandings()
 const nameGenerator = new NameGenerator()
 const terrain = new Terrain(scene, road, terrainProfile)
 road.attachTo(scene)
-new WaterFeatures(scene, terrain, road, terrainProfile)
+const waterFeatures = new WaterFeatures(scene, terrain, road, terrainProfile)
 new RockFeatures(scene, terrain, road, terrainProfile)
 const decorations = new Decorations(scene, terrain, road)
 const surfaceSpeedPolicy = new SurfaceSpeedPolicy(
@@ -165,7 +165,7 @@ let playerVehicleSpec: VehicleSpec | null = null
 let racingLinePlan: RacingLinePlan | null = null
 const surfaceCache = new Map<string, RoadSurfaceData>()
 const maxSurfaceCacheEntries = 4096
-const surfaceCacheScale = 2
+const surfaceCacheScale = 1.25
 
 const carAggregate = new CarAggregate()
 standingsView.updateRace(0, TARGET_LAPS, 0, 0, [], false)
@@ -318,6 +318,7 @@ function alignCarToSurface(view: CarView, car: CarAggregate, surface: RoadSurfac
 function resolveObstacleCollisions(): void {
   if (!carView) return
   resolveObstacleCollisionsFor(carView, carAggregate)
+  resolveTerrainSlopeCollisionFor(carView, carAggregate)
 }
 
 function resolveObstacleCollisionsFor(view: CarView, car: CarAggregate): void {
@@ -353,6 +354,22 @@ function resolveObstacleCollisionsFor(view: CarView, car: CarAggregate): void {
       car.resolveCollision(collisionNormal)
     }
   }
+}
+
+function resolveTerrainSlopeCollisionFor(view: CarView, car: CarAggregate): void {
+  const colliderRadius = carTemplateFactory.getBounds(view).colliderRadius
+  const carPosition = view.copyPosition(tmpCarPosition)
+  const barrier = terrain.getSlopeBarrier(
+    carPosition.x,
+    carPosition.z,
+    colliderRadius,
+    tmpVecE
+  )
+
+  if (!barrier) return
+
+  view.translateXZ(barrier.normal.x * barrier.pushOut, barrier.normal.z * barrier.pushOut)
+  car.resolveCollision(barrier.normal, 1.05, 0.35)
 }
 
 function getVehicleSurfaceAt(x: number, z: number) {
@@ -488,6 +505,7 @@ function applyDrivePhysics(
 
   view.addScaledVector(car.velocity, delta)
   resolveObstacleCollisionsFor(view, car)
+  resolveTerrainSlopeCollisionFor(view, car)
 
   view.copyPosition(tmpCarPosition)
   const surface = getVehicleSurfaceAt(tmpCarPosition.x, tmpCarPosition.z)
@@ -1048,6 +1066,7 @@ function animate(): void {
   snapCollisionMovedCompetitorsToSurface()
   updateCompetitionUi(delta)
   environmentController.update(delta)
+  waterFeatures.update(delta)
   skidTrail.update(carView, carAggregate, keys, road, terrain)
 
   if (keys.cameraToggle) {
@@ -1057,6 +1076,7 @@ function animate(): void {
 
   cameraRig.update(carView, carAggregate.heading, carAggregate.speed, delta)
   speedLines.update(carAggregate.speed, delta)
+  gameRenderer.updatePerformance(delta)
   minimapUpdateTimer -= delta
 
   if (minimapUpdateTimer <= 0) {

@@ -829,10 +829,12 @@ export class Decorations {
 
     this.visibilityUpdateTimer = qualitySettings.visibilityUpdateInterval
     const maxDistanceSq = qualitySettings.decorationDrawDistance * qualitySettings.decorationDrawDistance
+    const { children } = this.group
 
-    this.group.children.forEach((child) => {
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
       const center = child.userData.center as THREE.Vector3 | undefined
       child.visible = !center || center.distanceToSquared(carPosition) <= maxDistanceSq
-    })
+    }
   }
 }

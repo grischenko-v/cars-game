@@ -38,7 +38,7 @@ export class RockFeatures {
 
   private populate(): void {
     const clusterCount = this.terrainProfile.kind === 'mountains'
-      ? 42
+      ? 58
       : this.terrainProfile.kind === 'hills'
         ? 24
         : 8
@@ -66,7 +66,7 @@ export class RockFeatures {
           this.pseudoRandom(i + 7.4)
         )
       const rockCount = this.terrainProfile.kind === 'mountains'
-        ? THREE.MathUtils.lerp(5, 10, this.pseudoRandom(i + 9.8))
+        ? THREE.MathUtils.lerp(6, 12, this.pseudoRandom(i + 9.8))
         : THREE.MathUtils.lerp(2, 5, this.pseudoRandom(i + 9.8))
 
       for (let j = 0; j < Math.floor(rockCount); j++) {
@@ -123,8 +123,8 @@ export class RockFeatures {
       if (this.road.isPointOnRoad(x, z, this.road.shoulderWidth + 30)) continue
 
       const baseScale =
-        THREE.MathUtils.lerp(5.5, 13.5, this.pseudoRandom(seed + 4.2)) *
-        (this.terrainProfile.kind === 'mountains' ? 1.35 : 0.85)
+        THREE.MathUtils.lerp(6.5, 18.5, this.pseudoRandom(seed + 4.2)) *
+        (this.terrainProfile.kind === 'mountains' ? 1.7 : 0.85)
 
       this.instances.push({
         x,
@@ -143,11 +143,11 @@ export class RockFeatures {
 
   private addRockInstance(x: number, z: number, clusterIndex: number, rockIndex: number): void {
     const seed = clusterIndex * 31.7 + rockIndex * 11.3
-    const mountainScale = this.terrainProfile.kind === 'mountains' ? 1.8 : 1
+    const mountainScale = this.terrainProfile.kind === 'mountains' ? 2.35 : 1
     const baseScale =
       THREE.MathUtils.lerp(
         this.terrainProfile.kind === 'plain' ? 1.8 : 2.8,
-        this.terrainProfile.kind === 'plain' ? 4.4 : 8.8,
+        this.terrainProfile.kind === 'plain' ? 4.4 : 10.8,
         this.pseudoRandom(seed)
       ) * mountainScale
     const heightBoost = THREE.MathUtils.lerp(1.05, 2.25, this.pseudoRandom(seed + 2.2))

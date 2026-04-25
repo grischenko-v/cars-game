@@ -18,6 +18,12 @@ export interface TerrainProfile {
   detailFrequency: number
   ridgeAmplitude: number
   ridgeFrequency: number
+  massifAmplitude: number
+  massifFrequency: number
+  massifSharpness: number
+  valleyWallAmplitude: number
+  valleyWallDistance: number
+  valleyWallRamp: number
   roadsideCliffAmplitude: number
   roadsideCliffFrequency: number
   roadsideCliffThreshold: number

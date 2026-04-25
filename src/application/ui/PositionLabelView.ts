@@ -35,7 +35,8 @@ export class PositionLabelView {
   }
 
   update(targets: PositionLabelTarget[], camera: THREE.Camera, renderer: THREE.WebGLRenderer): void {
-    const rect = renderer.domElement.getBoundingClientRect()
+    const width = renderer.domElement.clientWidth
+    const height = renderer.domElement.clientHeight
     const nextLabels: PositionLabelState[] = []
 
     for (const target of targets) {
@@ -43,9 +44,13 @@ export class PositionLabelView {
       this.worldPosition.y += 3.2
       this.screenPosition.copy(this.worldPosition).project(camera)
 
-      const visible = this.screenPosition.z < 1
-      const x = (this.screenPosition.x * 0.5 + 0.5) * rect.width + rect.left
-      const y = (-this.screenPosition.y * 0.5 + 0.5) * rect.height + rect.top
+      const visible =
+        this.screenPosition.z > -1 &&
+        this.screenPosition.z < 1 &&
+        Math.abs(this.screenPosition.x) <= 1.12 &&
+        Math.abs(this.screenPosition.y) <= 1.12
+      const x = (this.screenPosition.x * 0.5 + 0.5) * width
+      const y = (-this.screenPosition.y * 0.5 + 0.5) * height
 
       nextLabels.push({
         id: target.id,

@@ -41,7 +41,7 @@ export class RoadMeshFactory {
       roughness: 1,
       metalness: 0,
       normalScale: new THREE.Vector2(0.22, 0.22),
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       polygonOffset: true,
       polygonOffsetFactor: 8,
       polygonOffsetUnits: 8,
@@ -118,7 +118,7 @@ export class RoadMeshFactory {
 
     const laneMarkMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -2,

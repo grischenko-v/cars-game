@@ -5,6 +5,7 @@ export class RainEffect {
   private readonly positions: Float32Array
   private readonly velocities: Float32Array
   private intensity = 0
+  private updateAccumulator = 0
 
   constructor(
     scene: THREE.Scene,
@@ -45,6 +46,11 @@ export class RainEffect {
 
   update(delta: number): void {
     if (this.intensity <= 0) return
+
+    this.updateAccumulator += delta
+    if (this.updateAccumulator < 1 / 50) return
+    delta = this.updateAccumulator
+    this.updateAccumulator = 0
 
     this.points.position.copy(this.camera.position)
     this.points.position.y += 4

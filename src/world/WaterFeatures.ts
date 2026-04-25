@@ -11,24 +11,30 @@ interface RectSpec {
   halfB: number
   conformToTerrain?: boolean
   maxY?: number
+  maxYHalfB?: number
+  segmentsA?: number
+  segmentsB?: number
 }
 
 export class WaterFeatures {
   private static readonly bridgeCandidateFractions = [0.34, 0.47, 0.61, 0.76, 0.88, 0.22]
 
   private readonly group = new THREE.Group()
+  private readonly waterColorTexture = WaterFeatures.createWaterColorTexture()
+  private readonly waterBumpTexture = WaterFeatures.createWaterBumpTexture()
   private readonly waterMaterial = new THREE.MeshStandardMaterial({
-    color: 0x356f8f,
-    roughness: 0.18,
-    metalness: 0.02,
-    transparent: true,
-    opacity: 0.68,
-    depthWrite: false,
-  })
-  private readonly bridgeDeckMaterial = new THREE.MeshStandardMaterial({
-    color: 0x1f2423,
-    roughness: 0.96,
-    metalness: 0.01,
+    color: 0x4fb6d8,
+    map: this.waterColorTexture,
+    bumpMap: this.waterBumpTexture,
+    bumpScale: 0.24,
+    roughness: 0.22,
+    metalness: 0.06,
+    emissive: 0x0b3141,
+    emissiveIntensity: 0.16,
+    transparent: false,
+    opacity: 1,
+    depthWrite: true,
+    side: THREE.FrontSide,
   })
   private readonly curbMaterial = new THREE.MeshStandardMaterial({
     color: 0xc8c7bd,
@@ -45,6 +51,15 @@ export class WaterFeatures {
     this.group.name = 'WaterFeatures'
     scene.add(this.group)
     this.build()
+  }
+
+  update(delta: number): void {
+    const flow = delta * 0.14
+
+    this.waterColorTexture.offset.y -= flow
+    this.waterColorTexture.offset.x += delta * 0.018
+    this.waterBumpTexture.offset.y -= flow * 1.45
+    this.waterBumpTexture.offset.x -= delta * 0.012
   }
 
   private build(): void {
@@ -103,13 +118,13 @@ export class WaterFeatures {
     this.road.sampleCenterlineByDistance(distance, center, tangent)
     side.set(-tangent.z, 0, tangent.x).normalize()
 
-    const riverWidth = THREE.MathUtils.lerp(16, 24, this.pseudoRandom(11.1))
+    const riverWidth = THREE.MathUtils.lerp(26, 34, this.pseudoRandom(11.1))
     const riverLength = this.terrainProfile.kind === 'mountains'
-      ? THREE.MathUtils.lerp(270, 390, this.pseudoRandom(12.7))
-      : THREE.MathUtils.lerp(220, 330, this.pseudoRandom(12.7))
+      ? THREE.MathUtils.lerp(132, 168, this.pseudoRandom(12.7))
+      : THREE.MathUtils.lerp(108, 144, this.pseudoRandom(12.7))
     const bridgeSurfaceY = this.road.getBankedHeightAtDistance(distance, 0, this.road.roadY)
     const waterCenter = center.clone()
-    waterCenter.y = bridgeSurfaceY - 0.26
+    waterCenter.y = bridgeSurfaceY - 0.72
 
     rects.push({
       center: waterCenter,
@@ -117,8 +132,9 @@ export class WaterFeatures {
       axisB: side.clone(),
       halfA: riverWidth * 0.5,
       halfB: riverLength * 0.5,
-      conformToTerrain: true,
-      maxY: bridgeSurfaceY - 0.18,
+      conformToTerrain: false,
+      segmentsA: 1,
+      segmentsB: 1,
     })
 
     this.addBridge(distance, riverWidth, center, tangent, side)
@@ -144,59 +160,24 @@ export class WaterFeatures {
     side: THREE.Vector3
   ): void {
     const bridgeWidth = this.road.getOuterHalfWidthAtDistance(distance) * 2 + 2.8
-    const bridgeLength = riverWidth + 10
-    const y = this.road.getBankedHeightAtDistance(distance, 0, this.road.roadY) + 0.07
+    const bridgeLength = riverWidth + 16
+    const y = this.road.getBankedHeightAtDistance(distance, 0, this.road.roadY)
     const heading = Math.atan2(tangent.x, tangent.z)
-    const deck = new THREE.Mesh(
-      new THREE.BoxGeometry(bridgeWidth, 0.16, bridgeLength),
-      this.bridgeDeckMaterial
-    )
-
-    deck.position.set(center.x, y, center.z)
-    deck.rotation.y = heading
-    deck.receiveShadow = true
-    deck.castShadow = true
-    this.group.add(deck)
 
     for (const sideSign of [-1, 1]) {
       const curb = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42, 0.38, bridgeLength + 0.8),
+        new THREE.BoxGeometry(0.56, 0.42, bridgeLength + 1.2),
         this.curbMaterial
       )
 
       curb.position
-        .set(center.x, y + 0.27, center.z)
-        .addScaledVector(side, sideSign * bridgeWidth * 0.48)
+        .set(center.x, y + 0.26, center.z)
+        .addScaledVector(side, sideSign * bridgeWidth * 0.5)
       curb.rotation.y = heading
       curb.castShadow = true
       curb.receiveShadow = true
       this.group.add(curb)
     }
-
-    this.addBridgeEndLip(center, tangent, heading, bridgeWidth, bridgeLength, y, -1)
-    this.addBridgeEndLip(center, tangent, heading, bridgeWidth, bridgeLength, y, 1)
-  }
-
-  private addBridgeEndLip(
-    center: THREE.Vector3,
-    tangent: THREE.Vector3,
-    heading: number,
-    bridgeWidth: number,
-    bridgeLength: number,
-    y: number,
-    sign: number
-  ): void {
-    const lip = new THREE.Mesh(
-      new THREE.BoxGeometry(bridgeWidth, 0.08, 0.32),
-      this.curbMaterial
-    )
-
-    lip.position
-      .set(center.x, y + 0.14, center.z)
-      .addScaledVector(tangent, sign * bridgeLength * 0.5)
-    lip.rotation.y = heading
-    lip.receiveShadow = true
-    this.group.add(lip)
   }
 
   private buildRectGeometry(rects: RectSpec[]): THREE.BufferGeometry {
@@ -206,41 +187,52 @@ export class WaterFeatures {
     const indices: number[] = []
 
     for (const rect of rects) {
+      const segmentsA = rect.segmentsA ?? 1
+      const segmentsB = rect.segmentsB ?? 1
       const base = positions.length / 3
-      const corners = [
-        new THREE.Vector3()
-          .copy(rect.center)
-          .addScaledVector(rect.axisA, -rect.halfA)
-          .addScaledVector(rect.axisB, -rect.halfB),
-        new THREE.Vector3()
-          .copy(rect.center)
-          .addScaledVector(rect.axisA, rect.halfA)
-          .addScaledVector(rect.axisB, -rect.halfB),
-        new THREE.Vector3()
-          .copy(rect.center)
-          .addScaledVector(rect.axisA, -rect.halfA)
-          .addScaledVector(rect.axisB, rect.halfB),
-        new THREE.Vector3()
-          .copy(rect.center)
-          .addScaledVector(rect.axisA, rect.halfA)
-          .addScaledVector(rect.axisB, rect.halfB),
-      ]
 
-      for (const corner of corners) {
-        if (rect.conformToTerrain) {
-          corner.y = Math.min(
-            this.terrain.height(corner.x, corner.z) + 0.055,
-            rect.maxY ?? corner.y
-          )
+      for (let b = 0; b <= segmentsB; b++) {
+        const v = b / segmentsB
+        const offsetB = THREE.MathUtils.lerp(-rect.halfB, rect.halfB, v)
+
+        for (let a = 0; a <= segmentsA; a++) {
+          const u = a / segmentsA
+          const offsetA = THREE.MathUtils.lerp(-rect.halfA, rect.halfA, u)
+          const point = new THREE.Vector3()
+            .copy(rect.center)
+            .addScaledVector(rect.axisA, offsetA)
+            .addScaledVector(rect.axisB, offsetB)
+
+          if (rect.conformToTerrain) {
+            const terrainWaterY = this.terrain.height(point.x, point.z) + 0.22
+            const shouldDipBelowBridge =
+              rect.maxY !== undefined &&
+              rect.maxYHalfB !== undefined &&
+              Math.abs(offsetB) <= rect.maxYHalfB
+
+            point.y = shouldDipBelowBridge
+              ? Math.min(terrainWaterY, rect.maxY)
+              : terrainWaterY
+          }
+
+          positions.push(point.x, point.y, point.z)
+          normals.push(0, 1, 0)
+          uvs.push(u, v)
         }
-
-        positions.push(corner.x, corner.y, corner.z)
-        normals.push(0, 1, 0)
       }
 
-      uvs.push(0, 0, 1, 0, 0, 1, 1, 1)
-      indices.push(base, base + 1, base + 2)
-      indices.push(base + 1, base + 3, base + 2)
+      const row = segmentsA + 1
+      for (let b = 0; b < segmentsB; b++) {
+        for (let a = 0; a < segmentsA; a++) {
+          const i0 = base + b * row + a
+          const i1 = i0 + 1
+          const i2 = i0 + row
+          const i3 = i2 + 1
+
+          indices.push(i0, i1, i2)
+          indices.push(i1, i3, i2)
+        }
+      }
     }
 
     const geometry = new THREE.BufferGeometry()
@@ -255,5 +247,101 @@ export class WaterFeatures {
 
   private pseudoRandom(seed: number): number {
     return THREE.MathUtils.euclideanModulo(Math.sin(seed * 12.9898) * 43758.5453, 1)
+  }
+
+  private static createWaterColorTexture(): THREE.CanvasTexture {
+    const size = 256
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+
+    if (!ctx) {
+      return new THREE.CanvasTexture(canvas)
+    }
+
+    const gradient = ctx.createLinearGradient(0, 0, size, size)
+    gradient.addColorStop(0, '#0f5f88')
+    gradient.addColorStop(0.45, '#2da2c7')
+    gradient.addColorStop(1, '#0b496d')
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, size, size)
+
+    ctx.globalAlpha = 0.34
+    ctx.strokeStyle = '#d8fbff'
+    ctx.lineWidth = 2
+
+    for (let row = -16; row < size + 24; row += 18) {
+      ctx.beginPath()
+      for (let x = -12; x <= size + 12; x += 8) {
+        const y =
+          row +
+          Math.sin(x * 0.055 + row * 0.18) * 5 +
+          Math.sin(x * 0.13 + row * 0.08) * 2
+
+        if (x === -12) {
+          ctx.moveTo(x, y)
+        } else {
+          ctx.lineTo(x, y)
+        }
+      }
+      ctx.stroke()
+    }
+
+    ctx.globalAlpha = 0.16
+    ctx.fillStyle = '#ffffff'
+    for (let i = 0; i < 90; i++) {
+      const x = (Math.sin(i * 12.9898) * 43758.5453) % size
+      const y = (Math.sin(i * 78.233) * 24634.6345) % size
+      ctx.fillRect(Math.abs(x), Math.abs(y), 10 + (i % 5) * 4, 1)
+    }
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.wrapS = THREE.RepeatWrapping
+    texture.wrapT = THREE.RepeatWrapping
+    texture.repeat.set(1.4, 8)
+    texture.anisotropy = 8
+
+    return texture
+  }
+
+  private static createWaterBumpTexture(): THREE.CanvasTexture {
+    const size = 128
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+
+    if (!ctx) {
+      return new THREE.CanvasTexture(canvas)
+    }
+
+    ctx.fillStyle = '#808080'
+    ctx.fillRect(0, 0, size, size)
+    ctx.strokeStyle = '#b4b4b4'
+    ctx.lineWidth = 2
+
+    for (let row = -12; row < size + 16; row += 10) {
+      ctx.beginPath()
+      for (let x = -8; x <= size + 8; x += 6) {
+        const y = row + Math.sin(x * 0.16 + row * 0.11) * 3
+
+        if (x === -8) {
+          ctx.moveTo(x, y)
+        } else {
+          ctx.lineTo(x, y)
+        }
+      }
+      ctx.stroke()
+    }
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.wrapS = THREE.RepeatWrapping
+    texture.wrapT = THREE.RepeatWrapping
+    texture.repeat.set(1.6, 10)
+    texture.anisotropy = 8
+
+    return texture
   }
 }

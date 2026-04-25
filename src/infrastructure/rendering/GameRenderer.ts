@@ -13,6 +13,9 @@ export class GameRenderer {
   readonly renderer: THREE.WebGLRenderer
   private readonly skyTopColor = new THREE.Color(0x6eaefc)
   private readonly skyBottomColor = new THREE.Color(0xf1f7ff)
+  private currentPixelRatio = qualitySettings.maxPixelRatio
+  private performanceSampleTime = 0
+  private performanceFrameCount = 0
 
   constructor(private readonly container: HTMLElement = document.body) {
     this.scene = this.createScene()
@@ -27,6 +30,24 @@ export class GameRenderer {
 
   render(): void {
     this.renderer.render(this.scene, this.camera)
+  }
+
+  updatePerformance(delta: number): void {
+    this.performanceSampleTime += delta
+    this.performanceFrameCount += 1
+
+    if (this.performanceSampleTime < 0.6) return
+
+    const averageDelta = this.performanceSampleTime / Math.max(this.performanceFrameCount, 1)
+
+    if (averageDelta > 1 / 48) {
+      this.applyPixelRatio(this.currentPixelRatio - 0.08)
+    } else if (averageDelta < 1 / 62) {
+      this.applyPixelRatio(this.currentPixelRatio + 0.04)
+    }
+
+    this.performanceSampleTime = 0
+    this.performanceFrameCount = 0
   }
 
   setSky(topColor: THREE.ColorRepresentation, bottomColor: THREE.ColorRepresentation): void {
@@ -69,7 +90,7 @@ export class GameRenderer {
       powerPreference: 'high-performance',
     })
     renderer.setSize(window.innerWidth, window.innerHeight)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, qualitySettings.maxPixelRatio))
+    renderer.setPixelRatio(this.clampPixelRatio(qualitySettings.maxPixelRatio))
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFShadowMap
     return renderer
@@ -79,6 +100,22 @@ export class GameRenderer {
     this.camera.aspect = window.innerWidth / window.innerHeight
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(window.innerWidth, window.innerHeight)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, qualitySettings.maxPixelRatio))
+    this.renderer.setPixelRatio(this.clampPixelRatio(this.currentPixelRatio))
+  }
+
+  private applyPixelRatio(nextRatio: number): void {
+    const clamped = this.clampPixelRatio(nextRatio)
+
+    if (Math.abs(clamped - this.currentPixelRatio) < 0.045) return
+
+    this.currentPixelRatio = clamped
+    this.renderer.setPixelRatio(clamped)
+  }
+
+  private clampPixelRatio(ratio: number): number {
+    return Math.min(
+      window.devicePixelRatio,
+      THREE.MathUtils.clamp(ratio, qualitySettings.minPixelRatio, qualitySettings.maxPixelRatio)
+    )
   }
 }

@@ -1,6 +1,7 @@
 export interface QualitySettings {
   decorationDrawDistance: number
   minimapUpdateInterval: number
+  minPixelRatio: number
   maxPixelRatio: number
   shadowMapSize: number
   terrainSegments: number
@@ -9,11 +10,12 @@ export interface QualitySettings {
 }
 
 export const qualitySettings: QualitySettings = {
-  decorationDrawDistance: 280,
-  minimapUpdateInterval: 0.08,
-  maxPixelRatio: 1.15,
+  decorationDrawDistance: 240,
+  minimapUpdateInterval: 0.12,
+  minPixelRatio: 0.72,
+  maxPixelRatio: 1.05,
   shadowMapSize: 512,
-  terrainSegments: 120,
-  uiLabelUpdateInterval: 0.08,
-  visibilityUpdateInterval: 0.18,
+  terrainSegments: 96,
+  uiLabelUpdateInterval: 0.12,
+  visibilityUpdateInterval: 0.24,
 }
