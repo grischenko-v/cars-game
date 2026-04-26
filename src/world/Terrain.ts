@@ -12,6 +12,7 @@ export class Terrain {
   geometry: THREE.PlaneGeometry
   material: THREE.MeshStandardMaterial
   mesh: THREE.Mesh
+  private readonly primaryBridgeDistance: number
 
   constructor(
     scene: THREE.Scene,
@@ -19,14 +20,32 @@ export class Terrain {
     private readonly profile: TerrainProfile
   ) {
     this.road = road
+    this.primaryBridgeDistance = this.road.getPrimaryBridgeDistance()
+    const terrainPadding = this.profile.kind === 'mountains'
+      ? 420
+      : this.profile.kind === 'hills'
+        ? 220
+        : 120
+    const bounds = this.road.getPlayableBounds(terrainPadding)
+    const sizeX = Math.max(bounds.maxX - bounds.minX, 480)
+    const sizeZ = Math.max(bounds.maxZ - bounds.minZ, 480)
+    const centerX = (bounds.minX + bounds.maxX) * 0.5
+    const centerZ = (bounds.minZ + bounds.maxZ) * 0.5
+    this.size = Math.max(sizeX, sizeZ)
+    this.segments = this.profile.kind === 'mountains'
+      ? Math.max(qualitySettings.terrainSegments * 2, 192)
+      : this.profile.kind === 'hills'
+        ? Math.max(Math.floor(qualitySettings.terrainSegments * 1.5), 144)
+        : qualitySettings.terrainSegments
 
     this.geometry = new THREE.PlaneGeometry(
-      this.size,
-      this.size,
+      sizeX,
+      sizeZ,
       this.segments,
       this.segments
     )
     this.geometry.rotateX(-Math.PI / 2)
+    this.geometry.translate(centerX, 0, centerZ)
 
     const terrainPos = this.geometry.attributes.position
     for (let i = 0; i < terrainPos.count; i++) {
@@ -60,6 +79,7 @@ export class Terrain {
     })
 
     this.mesh = new THREE.Mesh(this.geometry, this.material)
+    this.mesh.castShadow = true
     this.mesh.receiveShadow = true
     this.mesh.renderOrder = -10
     scene.add(this.mesh)
@@ -90,6 +110,7 @@ export class Terrain {
 
   height(x: number, z: number): number {
     const roadBand = this.road.getBandData(x, z)
+    const bridgeCut = this.bridgeRiverCutHeight(roadBand)
     const calmT = clamp(
       (roadBand.distFromRoadCenter - roadBand.halfWidth) / this.road.terrainCalmDistance,
       0,
@@ -104,8 +125,21 @@ export class Terrain {
       (
         this.rawHeight(x, z) +
         this.valleyWallHeight(roadBand) +
-        this.roadsideReliefHeight(roadBand)
+        this.roadsideReliefHeight(roadBand) +
+        bridgeCut
       ) * calmFactor
+    const mountainDistanceFade = this.profile.kind === 'mountains'
+      ? THREE.MathUtils.lerp(
+          1,
+          0.18,
+          THREE.MathUtils.smoothstep(
+            clamp((roadBand.distFromRoadCenter - roadBand.halfWidth - 220) / 320, 0, 1),
+            0,
+            1
+          )
+        )
+      : 1
+    const shapedBaseHeight = baseHeight * mountainDistanceFade
     const roadEdgeOffset = clamp(
       roadBand.lateralOffset,
       -roadBand.halfWidth,
@@ -143,13 +177,16 @@ export class Terrain {
         this.road.apronY
       ) -
       this.road.cutDepth * 0.55
+    const hiddenRoadBedHeight = roadBedHeight - 0.18
+    const hiddenShoulderBedHeight = shoulderBedHeight - 0.12 + bridgeCut * 0.38
+    const hiddenApronBedHeight = apronBedHeight - 0.1 + bridgeCut * 0.82
     const hardRoadLimit = roadBand.halfWidth + this.road.terrainHardMargin
     const shoulderLimit =
       hardRoadLimit + this.road.shoulderWidth + this.road.terrainShoulderMargin
     const apronLimit = shoulderLimit + this.road.apronWidth
 
     if (roadBand.distFromRoadCenter <= hardRoadLimit) {
-      return roadBedHeight
+      return hiddenRoadBedHeight
     }
 
     if (roadBand.distFromRoadCenter <= shoulderLimit) {
@@ -160,11 +197,11 @@ export class Terrain {
         1
       )
       const k = THREE.MathUtils.smoothstep(t, 0, 1)
-      return THREE.MathUtils.lerp(roadBedHeight, shoulderBedHeight, k)
+      return THREE.MathUtils.lerp(hiddenRoadBedHeight, hiddenShoulderBedHeight, k)
     }
 
     if (roadBand.distFromRoadCenter <= apronLimit) {
-      return apronBedHeight
+      return hiddenApronBedHeight
     }
 
     if (roadBand.distFromRoadCenter <= apronLimit + this.road.terrainBlend) {
@@ -174,10 +211,10 @@ export class Terrain {
         1
       )
       const k = THREE.MathUtils.smoothstep(t, 0, 1)
-      return THREE.MathUtils.lerp(apronBedHeight, baseHeight, k)
+      return THREE.MathUtils.lerp(hiddenApronBedHeight, shapedBaseHeight, k)
     }
 
-    return baseHeight
+    return shapedBaseHeight
   }
 
   private roadsideReliefHeight(roadBand: {
@@ -257,6 +294,38 @@ export class Terrain {
     return this.profile.valleyWallAmplitude * terracedSlope * ridgeRhythm
   }
 
+  private bridgeRiverCutHeight(roadBand: {
+    distanceAlong: number
+    distFromRoadCenter: number
+    halfWidth: number
+    lateralOffset: number
+  }): number {
+    const alongDelta = THREE.MathUtils.euclideanModulo(
+      roadBand.distanceAlong - this.primaryBridgeDistance + this.road.totalLength * 0.5,
+      this.road.totalLength
+    ) - this.road.totalLength * 0.5
+    const alongAbs = Math.abs(alongDelta)
+
+    if (alongAbs > 156) return 0
+
+    const outerHalfWidth = this.road.getOuterHalfWidthAtDistance(this.primaryBridgeDistance)
+    const riverCrossReach = outerHalfWidth + this.road.apronWidth + 84
+    const lateralAbs = Math.abs(roadBand.lateralOffset)
+    const sideBranchCenter = outerHalfWidth + this.road.apronWidth + 18
+    const sideBranchDistance = Math.abs(lateralAbs - sideBranchCenter)
+    const alongMask = 1 - THREE.MathUtils.smoothstep(alongAbs, 20, 156)
+    const centralMask = 1 - THREE.MathUtils.smoothstep(lateralAbs, outerHalfWidth * 0.08, riverCrossReach)
+    const branchMask = 1 - THREE.MathUtils.smoothstep(sideBranchDistance, 10, 56)
+    const depth =
+      this.profile.kind === 'mountains'
+        ? 9.8
+        : this.profile.kind === 'hills'
+          ? 7.2
+          : 6.2
+
+    return -depth * alongMask * Math.max(centralMask, branchMask * 0.82)
+  }
+
   getHeightAndNormal(x: number, z: number): { height: number; normal: THREE.Vector3 } {
     const h = this.height(x, z)
     const eps = 0.2
@@ -287,6 +356,29 @@ export class Terrain {
       this.road.terrainBlend * 0.72
 
     if (roadBand.distFromRoadCenter <= barrierStart) return null
+
+    if (this.profile.kind !== 'plain') {
+      const dx = roadBand.nearestPoint.x - x
+      const dz = roadBand.nearestPoint.z - z
+      const dist = Math.hypot(dx, dz)
+
+      if (dist < 0.0001) return null
+
+      outNormal.set(dx / dist, 0, dz / dist)
+
+      const offroadPenetration = roadBand.distFromRoadCenter - barrierStart + colliderRadius * 0.8
+      if (offroadPenetration > 0) {
+        const terrainPush =
+          this.profile.kind === 'mountains'
+            ? Math.max(offroadPenetration, colliderRadius * 0.42)
+            : Math.max(offroadPenetration * 0.82, colliderRadius * 0.3)
+
+        return {
+          normal: outNormal,
+          pushOut: terrainPush,
+        }
+      }
+    }
 
     const { normal } = this.getHeightAndNormal(x, z)
     const steepness = 1 - normal.y

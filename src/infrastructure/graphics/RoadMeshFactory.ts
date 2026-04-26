@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { TerrainProfile } from '../../domain/environment/TerrainProfile'
 import { TrackModel } from '../../domain/road/TrackModel'
 import { getStartDistance, getStartGridSlots } from '../../domain/race/StartGrid'
 import type { PbrTextureSet } from './TextureFactory'
@@ -13,34 +14,47 @@ export interface RoadSceneMeshes {
 }
 
 export class RoadMeshFactory {
-  private static readonly ROAD_MESH_SAMPLE_SPACING = 4
+  private static readonly ROAD_MESH_SAMPLE_SPACING = 1.4
   private static readonly ASPHALT_PATCH_LIFT = 0.006
   private static readonly ASPHALT_WEAR_LIFT = 0.008
   private static readonly ASPHALT_CRACK_LIFT = 0.01
-  private static readonly PAINT_LIFT = 0.012
-  private static readonly RAISED_PAINT_LIFT = 0.016
+  private static readonly EDGE_PAINT_LIFT = 0.008
+  private static readonly PAINT_LIFT = 0.024
+  private static readonly RAISED_PAINT_LIFT = 0.034
+  private static readonly DECAL_ALPHA_TEST = 0.08
 
-  create(track: TrackModel): RoadSceneMeshes {
+  create(
+    track: TrackModel,
+    terrainProfile?: TerrainProfile,
+    bridgeDistance: number | null = null
+  ): RoadSceneMeshes {
+    const isMountainTerrain = terrainProfile?.kind === 'mountains'
     const terrainBackfillGeometry = this.buildBandGeometry(
       track,
-      track.outerHalfWidth + track.apronWidth - 1.2,
-      track.outerHalfWidth + track.apronWidth + 12,
-      track.apronY - 0.08
+      track.outerHalfWidth + track.apronWidth - (isMountainTerrain ? 0.6 : 0.35),
+      track.outerHalfWidth + track.apronWidth + (isMountainTerrain ? 6.5 : 8.5),
+      track.apronY - (isMountainTerrain ? 0.22 : 0.16),
+      bridgeDistance === null
+        ? null
+        : { centerDistance: bridgeDistance, halfLength: 38 }
     )
-    const grassBackfillTextures = loadRepeatingPbrTextures(
-      '/textures/grass',
-      'Grass001_1K-JPG',
-      Math.max(track.totalLength / 28, 1),
-      2.4
+    const terrainBackfillTextures = loadRepeatingPbrTextures(
+      isMountainTerrain ? '/textures/sand' : '/textures/grass',
+      isMountainTerrain ? 'Ground054_1K-JPG' : 'Grass001_1K-JPG',
+      Math.max(track.totalLength / (isMountainTerrain ? 36 : 28), 1),
+      isMountainTerrain ? 2.2 : 2.4
     )
     const terrainBackfillMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf2ffe2,
-      map: grassBackfillTextures.map,
-      normalMap: grassBackfillTextures.normalMap,
-      roughnessMap: grassBackfillTextures.roughnessMap,
+      color: isMountainTerrain ? 0x948a76 : 0xcfe3b7,
+      map: terrainBackfillTextures.map,
+      normalMap: terrainBackfillTextures.normalMap,
+      roughnessMap: terrainBackfillTextures.roughnessMap,
       roughness: 1,
       metalness: 0,
-      normalScale: new THREE.Vector2(0.22, 0.22),
+      normalScale: new THREE.Vector2(
+        isMountainTerrain ? 0.34 : 0.22,
+        isMountainTerrain ? 0.34 : 0.22
+      ),
       side: THREE.FrontSide,
       polygonOffset: true,
       polygonOffsetFactor: 8,
@@ -49,12 +63,16 @@ export class RoadMeshFactory {
     const terrainBackfill = new THREE.Mesh(terrainBackfillGeometry, terrainBackfillMaterial)
     terrainBackfill.receiveShadow = true
     terrainBackfill.renderOrder = -5
+    terrainBackfill.visible = !isMountainTerrain
 
     const apronGeometry = this.buildBandGeometry(
       track,
       track.outerHalfWidth,
       track.outerHalfWidth + track.apronWidth,
-      track.apronY
+      track.apronY,
+      bridgeDistance === null
+        ? null
+        : { centerDistance: bridgeDistance, halfLength: 34 }
     )
     const apronMaterial = new THREE.MeshStandardMaterial({
       color: 0x9b8f78,
@@ -62,8 +80,8 @@ export class RoadMeshFactory {
       metalness: 0,
       side: THREE.FrontSide,
       polygonOffset: true,
-      polygonOffsetFactor: -6,
-      polygonOffsetUnits: -6,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     })
     const apron = new THREE.Mesh(apronGeometry, apronMaterial)
     apron.receiveShadow = true
@@ -90,7 +108,9 @@ export class RoadMeshFactory {
       transparent: false,
       opacity: 1,
       depthWrite: true,
-      polygonOffset: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
     })
     const road = new THREE.Mesh(roadGeometry, roadMaterial)
     road.frustumCulled = false
@@ -101,7 +121,10 @@ export class RoadMeshFactory {
       track,
       track.trackHalfWidth,
       track.outerHalfWidth,
-      track.shoulderY
+      track.shoulderY,
+      bridgeDistance === null
+        ? null
+        : { centerDistance: bridgeDistance, halfLength: 32 }
     )
     const shoulderMaterial = new THREE.MeshStandardMaterial({
       color: 0x9b8f78,
@@ -109,8 +132,8 @@ export class RoadMeshFactory {
       metalness: 0,
       side: THREE.FrontSide,
       polygonOffset: true,
-      polygonOffsetFactor: -10,
-      polygonOffsetUnits: -10,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
     })
     const shoulder = new THREE.Mesh(shoulderGeometry, shoulderMaterial)
     shoulder.receiveShadow = true
@@ -118,66 +141,35 @@ export class RoadMeshFactory {
 
     const laneMarkMaterial = new THREE.MeshBasicMaterial({
       color: 0xffffff,
-      side: THREE.FrontSide,
+      side: THREE.DoubleSide,
+      depthTest: true,
       depthWrite: false,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: -12,
+      polygonOffsetUnits: -12,
     })
     const markingGroup = new THREE.Group()
-    const asphaltRepairs = new THREE.Mesh(
-      this.buildAsphaltRepairGeometry(track),
-      new THREE.MeshStandardMaterial({
-        color: 0x656b67,
-        map: asphaltTextures.map,
-        normalMap: asphaltTextures.normalMap,
-        roughnessMap: asphaltTextures.roughnessMap,
-        roughness: 0.98,
-        metalness: 0.01,
-        alphaMap: asphaltPatchAlpha,
-        transparent: true,
-        opacity: 0.58,
-        normalScale: new THREE.Vector2(0.24, 0.24),
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      })
-    )
-    asphaltRepairs.frustumCulled = false
-    asphaltRepairs.receiveShadow = true
-    asphaltRepairs.renderOrder = 6
-    const asphaltVariationMeshes = this.buildAsphaltVariationMeshes(
-      track,
-      asphaltTextures,
-      asphaltPatchAlpha
-    )
     const asphaltWear = new THREE.Mesh(
       this.buildAsphaltWearGeometry(track),
       new THREE.MeshBasicMaterial({
         color: 0x202624,
-        side: THREE.DoubleSide,
-        depthWrite: false,
+        side: THREE.FrontSide,
+        depthWrite: true,
         polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       })
     )
     asphaltWear.frustumCulled = false
     asphaltWear.renderOrder = 7
     const laneMarking = new THREE.Mesh(this.buildLaneMarkingGeometry(track), laneMarkMaterial)
     laneMarking.frustumCulled = false
-    laneMarking.renderOrder = 8
+    laneMarking.renderOrder = 12
     const startGrid = new THREE.Mesh(this.buildStartGridGeometry(track), laneMarkMaterial)
     startGrid.frustumCulled = false
-    startGrid.renderOrder = 9
-    const roadsideGroup = this.buildRoadsideInfrastructure(track)
-    markingGroup.renderOrder = 8
-    markingGroup.add(asphaltRepairs)
-    for (const mesh of asphaltVariationMeshes) {
-      markingGroup.add(mesh)
-    }
+    startGrid.renderOrder = 13
+    const roadsideGroup = this.buildRoadsideInfrastructure(track, bridgeDistance)
+    markingGroup.renderOrder = 10
     markingGroup.add(asphaltWear)
     markingGroup.add(laneMarking)
     markingGroup.add(startGrid)
@@ -276,7 +268,8 @@ export class RoadMeshFactory {
     track: TrackModel,
     innerHalfWidth: number,
     outerHalfWidth: number,
-    y: number
+    y: number,
+    gap: { centerDistance: number; halfLength: number } | null = null
   ): THREE.BufferGeometry {
     const outerLeftSamples = this.buildOffsetSamples(track, outerHalfWidth, y)
     const innerLeftSamples = this.buildOffsetSamples(track, innerHalfWidth, y)
@@ -326,6 +319,16 @@ export class RoadMeshFactory {
     for (let i = 0; i < outerLeftLoop.length; i++) {
       const base = i * 4
       const nextBase = ((i + 1) % outerLeftLoop.length) * 4
+      const startDistance = outerLeftSamples.distances[i] ?? 0
+      const endDistance = outerLeftSamples.distances[(i + 1) % outerLeftLoop.length] ?? 0
+      const centerDistance = THREE.MathUtils.euclideanModulo(
+        startDistance + this.getWrappedSegmentDelta(track, startDistance, endDistance) * 0.5,
+        track.totalLength
+      )
+
+      if (gap && this.isDistanceInsideGap(track, centerDistance, gap.centerDistance, gap.halfLength)) {
+        continue
+      }
 
       indices.push(base, base + 1, nextBase)
       indices.push(base + 1, nextBase + 1, nextBase)
@@ -347,6 +350,31 @@ export class RoadMeshFactory {
     geometry.setIndex(indices)
     geometry.computeBoundingSphere()
     return geometry
+  }
+
+  private getWrappedSegmentDelta(
+    track: TrackModel,
+    startDistance: number,
+    endDistance: number
+  ): number {
+    return THREE.MathUtils.euclideanModulo(
+      endDistance - startDistance + track.totalLength * 0.5,
+      track.totalLength
+    ) - track.totalLength * 0.5
+  }
+
+  private isDistanceInsideGap(
+    track: TrackModel,
+    distance: number,
+    centerDistance: number,
+    halfLength: number
+  ): boolean {
+    const delta = THREE.MathUtils.euclideanModulo(
+      distance - centerDistance + track.totalLength * 0.5,
+      track.totalLength
+    ) - track.totalLength * 0.5
+
+    return Math.abs(delta) <= halfLength
   }
 
   private buildLaneMarkingGeometry(track: TrackModel): THREE.BufferGeometry {
@@ -487,9 +515,12 @@ export class RoadMeshFactory {
     uvs: number[],
     indices: number[]
   ): void {
-    const edgeInset = 0.12
+    const edgeInset = 0.22
     const edgeWidth = 0.34
-    const sampleCount = Math.max(track.centerline.length, Math.floor(track.totalLength / 4))
+    const sampleCount = Math.max(
+      track.centerline.length,
+      Math.floor(track.totalLength / 1.25)
+    )
 
     for (let i = 0; i < sampleCount; i++) {
       const distance = (i / sampleCount) * track.totalLength
@@ -506,7 +537,7 @@ export class RoadMeshFactory {
         track,
         distance,
         outerOffset,
-        RoadMeshFactory.PAINT_LIFT,
+        RoadMeshFactory.EDGE_PAINT_LIFT,
         positions,
         normals
       )
@@ -514,7 +545,7 @@ export class RoadMeshFactory {
         track,
         distance,
         innerOffset,
-        RoadMeshFactory.PAINT_LIFT,
+        RoadMeshFactory.EDGE_PAINT_LIFT,
         positions,
         normals
       )
@@ -522,7 +553,7 @@ export class RoadMeshFactory {
         track,
         nextDistance,
         nextOuterOffset,
-        RoadMeshFactory.PAINT_LIFT,
+        RoadMeshFactory.EDGE_PAINT_LIFT,
         positions,
         normals
       )
@@ -530,7 +561,7 @@ export class RoadMeshFactory {
         track,
         nextDistance,
         nextInnerOffset,
-        RoadMeshFactory.PAINT_LIFT,
+        RoadMeshFactory.EDGE_PAINT_LIFT,
         positions,
         normals
       )
@@ -850,16 +881,15 @@ export class RoadMeshFactory {
       normalMap: asphaltTextures.normalMap,
       roughnessMap: asphaltTextures.roughnessMap,
       alphaMap,
+      alphaTest: RoadMeshFactory.DECAL_ALPHA_TEST,
       roughness: options.roughness,
       metalness: 0.01,
       normalScale: new THREE.Vector2(options.normalScale, options.normalScale),
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: options.opacity,
-      depthWrite: false,
+      side: THREE.FrontSide,
+      depthWrite: true,
       polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     })
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false
@@ -982,10 +1012,13 @@ export class RoadMeshFactory {
     return geometry
   }
 
-  private buildRoadsideInfrastructure(track: TrackModel): THREE.Group {
+  private buildRoadsideInfrastructure(
+    track: TrackModel,
+    bridgeDistance: number | null
+  ): THREE.Group {
     const group = new THREE.Group()
     const barrier = new THREE.Mesh(
-      this.buildGuardrailBarrierGeometry(track),
+      this.buildGuardrailBarrierGeometry(track, bridgeDistance),
       new THREE.MeshStandardMaterial({
         color: 0xb4b0a4,
         roughness: 0.68,
@@ -1008,7 +1041,10 @@ export class RoadMeshFactory {
     return group
   }
 
-  private buildGuardrailBarrierGeometry(track: TrackModel): THREE.BufferGeometry {
+  private buildGuardrailBarrierGeometry(
+    track: TrackModel,
+    bridgeDistance: number | null
+  ): THREE.BufferGeometry {
     const positions: number[] = []
     const indices: number[] = []
     const segmentLength = 7.5
@@ -1024,6 +1060,12 @@ export class RoadMeshFactory {
       const middleDistance = (startDistance + endDistance) * 0.5
 
       if (!this.shouldPlaceGuardrail(track, startDistance, middleDistance, endDistance)) continue
+      if (
+        bridgeDistance !== null &&
+        this.isDistanceInsideGap(track, middleDistance, bridgeDistance, 42)
+      ) {
+        continue
+      }
 
       track.sampleCenterlineByDistance(startDistance, centerA, tangent)
       track.sampleCenterlineByDistance(endDistance, centerB)
@@ -1155,13 +1197,13 @@ export class RoadMeshFactory {
       variant === 0
         ? new THREE.Mesh(
             new THREE.CircleGeometry(0.62, 24),
-            new THREE.MeshBasicMaterial({ color: 0xe7efe9, side: THREE.DoubleSide })
+            new THREE.MeshBasicMaterial({ color: 0xe7efe9, side: THREE.FrontSide })
           )
         : new THREE.Mesh(
             new THREE.PlaneGeometry(1.25, variant === 1 ? 0.72 : 0.92),
             new THREE.MeshBasicMaterial({
               color: variant === 1 ? 0x2f6bb0 : variant === 2 ? 0xd8b13f : 0xf0f0e6,
-              side: THREE.DoubleSide,
+              side: THREE.FrontSide,
             })
           )
 
@@ -1173,7 +1215,7 @@ export class RoadMeshFactory {
     if (variant === 0) {
       const warning = new THREE.Mesh(
         new THREE.CircleGeometry(0.46, 24),
-        new THREE.MeshBasicMaterial({ color: 0xc63c32, side: THREE.DoubleSide })
+        new THREE.MeshBasicMaterial({ color: 0xc63c32, side: THREE.FrontSide })
       )
       warning.position.copy(board.position).addScaledVector(faceDirection, 0.01)
       warning.rotation.y = yaw

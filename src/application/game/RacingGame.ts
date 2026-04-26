@@ -93,6 +93,7 @@ import { Terrain } from '../../world/Terrain'
 import { Decorations } from '../../world/Decorations'
 import { WaterFeatures } from '../../world/WaterFeatures'
 import { RockFeatures } from '../../world/RockFeatures'
+import { MountainBackdrop } from '../../world/MountainBackdrop'
 import { RaceStandings } from '../../domain/race/RaceStandings'
 
 export function startRacingGame(): void {
@@ -125,10 +126,21 @@ const race = new Race(TARGET_LAPS, road.startAngle, road.totalLength)
 const raceStandings = new RaceStandings()
 const nameGenerator = new NameGenerator()
 const terrain = new Terrain(scene, road, terrainProfile)
-road.attachTo(scene)
+const mountainBackdrop = new MountainBackdrop(scene, road, terrainProfile)
+const playableBounds = road.getPlayableBounds(56)
+const playableBoundsPadding = 4
+const playableBoundsCenterX = (playableBounds.minX + playableBounds.maxX) * 0.5
+const playableBoundsCenterZ = (playableBounds.minZ + playableBounds.maxZ) * 0.5
+const playableSpanX = playableBounds.maxX - playableBounds.minX
+const playableSpanZ = playableBounds.maxZ - playableBounds.minZ
+const playableDiagonal = Math.hypot(playableSpanX, playableSpanZ)
+road.attachTo(scene, terrainProfile)
 const waterFeatures = new WaterFeatures(scene, terrain, road, terrainProfile)
-new RockFeatures(scene, terrain, road, terrainProfile)
-const decorations = new Decorations(scene, terrain, road)
+
+if (terrainProfile.kind !== 'mountains') {
+  new RockFeatures(scene, terrain, road, terrainProfile)
+}
+const decorations = new Decorations(scene, terrain, road, terrainProfile)
 const surfaceSpeedPolicy = new SurfaceSpeedPolicy(
   (x, z) => decorations.getGroundSurfaceAt(x, z),
   {
@@ -149,7 +161,7 @@ const vehicleGrounding = new VehicleGroundingService(
   carTemplateFactory,
   getVehicleSurfaceAt,
   {
-    rideHeightOffset: 0.055,
+    rideHeightOffset: 0.006,
     roadGroundClearance: CAR_GROUND_CLEARANCE,
     offroadGroundClearance: OFFROAD_GROUND_CLEARANCE,
     offroadRideHeightBoost: OFFROAD_RIDE_HEIGHT_BOOST,
@@ -169,6 +181,11 @@ const surfaceCacheScale = 1.25
 
 const carAggregate = new CarAggregate()
 standingsView.updateRace(0, TARGET_LAPS, 0, 0, [], false)
+gameRenderer.setCameraFar(
+  terrainProfile.kind === 'mountains'
+    ? Math.min(1850, Math.max(1200, playableDiagonal * 1.05 + 520))
+    : Math.min(900, Math.max(260, playableDiagonal * 0.72 + 140))
+)
 
 const clock = new THREE.Clock()
 
@@ -370,6 +387,31 @@ function resolveTerrainSlopeCollisionFor(view: CarView, car: CarAggregate): void
 
   view.translateXZ(barrier.normal.x * barrier.pushOut, barrier.normal.z * barrier.pushOut)
   car.resolveCollision(barrier.normal, 1.05, 0.35)
+}
+
+function constrainVehicleToPlayableBounds(
+  view: CarView,
+  car: CarAggregate,
+  pushStrength: number,
+  collisionStrength: number
+): void {
+  const position = view.copyPosition(tmpCarPosition)
+  const minX = playableBounds.minX + playableBoundsPadding
+  const maxX = playableBounds.maxX - playableBoundsPadding
+  const minZ = playableBounds.minZ + playableBoundsPadding
+  const maxZ = playableBounds.maxZ - playableBoundsPadding
+  const clampedX = clamp(position.x, minX, maxX)
+  const clampedZ = clamp(position.z, minZ, maxZ)
+
+  if (clampedX === position.x && clampedZ === position.z) return
+
+  const dx = position.x - clampedX
+  const dz = position.z - clampedZ
+  const distance = Math.max(Math.hypot(dx, dz), 0.0001)
+  tmpVecE.set(dx / distance, 0, dz / distance)
+  view.setPosition(tmpVecA.set(clampedX, position.y, clampedZ))
+  car.resolveCollision(tmpVecE, pushStrength, collisionStrength)
+  car.moveSpeedTowardZero(2.8)
 }
 
 function getVehicleSurfaceAt(x: number, z: number) {
@@ -684,6 +726,7 @@ function updateDrive(delta: number): void {
   carView.addScaledVector(carAggregate.velocity, delta)
 
   resolveObstacleCollisions()
+  constrainVehicleToPlayableBounds(carView, carAggregate, 0.92, 0.42)
 
   carView.copyPosition(tmpCarPosition)
   const surface = getVehicleSurfaceAt(tmpCarPosition.x, tmpCarPosition.z)
@@ -809,6 +852,8 @@ function updateOpponents(delta: number): void {
       },
       delta
     )
+
+    constrainVehicleToPlayableBounds(competitor.view, competitor.car, 0.85, 0.36)
 
     const constrainedRoadBand = applyOpponentRailConstraint(competitor, delta)
     competitor.view.copyPosition(tmpCarPosition)
@@ -974,13 +1019,30 @@ function resolveCompetitorCollisions(): void {
           const roadBand = road.getBandData(midX, midZ)
           tmpVecE.set(-roadBand.tangent.z, 0, roadBand.tangent.x).normalize()
 
-          const firstSide = i % 2 === 0 ? 1 : -1
-          const sidePush = Math.min(0.42, 0.12 + overlap * 0.18)
-          first.view.translateXZ(tmpVecE.x * sidePush * firstSide, tmpVecE.z * sidePush * firstSide)
+          const firstOffset = first.railLateralOffset ?? roadBand.lateralOffset
+          const secondOffset = second.railLateralOffset ?? roadBand.lateralOffset
+          const sideDirection =
+            Math.abs(firstOffset - secondOffset) > 0.16
+              ? Math.sign(firstOffset - secondOffset)
+              : i % 2 === 0 ? 1 : -1
+          const sidePush = Math.min(0.86, 0.24 + overlap * 0.34)
+          first.view.translateXZ(tmpVecE.x * sidePush * sideDirection, tmpVecE.z * sidePush * sideDirection)
           second.view.translateXZ(
-            -tmpVecE.x * sidePush * firstSide,
-            -tmpVecE.z * sidePush * firstSide
+            -tmpVecE.x * sidePush * sideDirection,
+            -tmpVecE.z * sidePush * sideDirection
           )
+          first.railLateralOffset = clamp(
+            firstOffset + sidePush * sideDirection * 0.8,
+            -roadBand.halfWidth * OPPONENT_RAIL_HALF_WIDTH_FACTOR,
+            roadBand.halfWidth * OPPONENT_RAIL_HALF_WIDTH_FACTOR
+          )
+          second.railLateralOffset = clamp(
+            secondOffset - sidePush * sideDirection * 0.8,
+            -roadBand.halfWidth * OPPONENT_RAIL_HALF_WIDTH_FACTOR,
+            roadBand.halfWidth * OPPONENT_RAIL_HALF_WIDTH_FACTOR
+          )
+          first.car.moveSpeedTowardZero(2.4 + overlap * 1.8)
+          second.car.moveSpeedTowardZero(2.4 + overlap * 1.8)
           queueCollisionGrounding(first)
           queueCollisionGrounding(second)
           resolveCarCarImpact(first, second, nx, nz, overlap * 1.25)
@@ -1075,6 +1137,7 @@ function animate(): void {
   }
 
   cameraRig.update(carView, carAggregate.heading, carAggregate.speed, delta)
+  mountainBackdrop.update()
   speedLines.update(carAggregate.speed, delta)
   gameRenderer.updatePerformance(delta)
   minimapUpdateTimer -= delta

@@ -37,12 +37,12 @@ export class LightingFactory {
     sun.castShadow = true
     sun.shadow.mapSize.width = qualitySettings.shadowMapSize
     sun.shadow.mapSize.height = qualitySettings.shadowMapSize
-    sun.shadow.camera.left = -180
-    sun.shadow.camera.right = 180
-    sun.shadow.camera.top = 180
-    sun.shadow.camera.bottom = -180
+    sun.shadow.camera.left = -240
+    sun.shadow.camera.right = 240
+    sun.shadow.camera.top = 240
+    sun.shadow.camera.bottom = -240
     sun.shadow.camera.near = 1
-    sun.shadow.camera.far = 320
+    sun.shadow.camera.far = 520
     sun.shadow.bias = 0.00008
     sun.shadow.normalBias = 0.08
     return sun

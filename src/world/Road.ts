@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { TerrainProfile } from '../domain/environment/TerrainProfile'
 import type { RoadBandData, RoadSurfaceData, TrackBounds, TurnInfo } from '../domain/road/TrackModel'
 import { TrackModel } from '../domain/road/TrackModel'
 import { RandomClosedLoopTrackStrategy } from '../domain/road/RandomClosedLoopTrackStrategy'
@@ -6,6 +7,7 @@ import type { TrackGenerationStrategy } from '../domain/road/TrackGenerationStra
 import { RoadMeshFactory } from '../infrastructure/graphics/RoadMeshFactory'
 
 export class Road {
+  private static readonly bridgeCandidateFractions = [0.34, 0.47, 0.61, 0.76, 0.88, 0.22]
   private readonly track: TrackModel
   private readonly meshFactory: RoadMeshFactory
 
@@ -115,8 +117,63 @@ export class Road {
     return this.track.trackBounds
   }
 
-  attachTo(scene: THREE.Scene): void {
-    const meshes = this.meshFactory.create(this.track)
+  getPlayableBounds(padding = 0): TrackBounds {
+    const edgeMargin =
+      this.track.outerHalfWidth +
+      this.track.apronWidth +
+      this.track.terrainBlend +
+      padding
+
+    return {
+      minX: this.track.trackBounds.minX - edgeMargin,
+      maxX: this.track.trackBounds.maxX + edgeMargin,
+      minZ: this.track.trackBounds.minZ - edgeMargin,
+      maxZ: this.track.trackBounds.maxZ + edgeMargin,
+    }
+  }
+
+  getPrimaryBridgeDistance(): number {
+    let bestDistance = this.track.totalLength * 0.5
+    let bestScore = Infinity
+
+    for (const fraction of Road.bridgeCandidateFractions) {
+      const baseDistance = fraction * this.track.totalLength
+
+      for (let offset = -120; offset <= 120; offset += 20) {
+        const distance = THREE.MathUtils.euclideanModulo(
+          baseDistance + offset,
+          this.track.totalLength
+        )
+        const startDelta = Math.min(distance, this.track.totalLength - distance)
+
+        if (startDelta < 220) continue
+        if (this.track.isLaneTransitionAtDistance(distance, 160)) continue
+
+        const laneCount = this.track.getEffectiveLaneCountAtDistance(distance)
+        const prevLaneCount = this.track.getEffectiveLaneCountAtDistance(distance - 60)
+        const nextLaneCount = this.track.getEffectiveLaneCountAtDistance(distance + 60)
+        if (laneCount !== 2 || prevLaneCount !== 2 || nextLaneCount !== 2) continue
+
+        const lanePenalty = Math.abs(laneCount - 2) * 18
+        const slopePenalty = Math.abs(this.track.getBankSlopeAtDistance(distance)) * 420
+        const score = lanePenalty + slopePenalty + Math.abs(offset) * 0.12
+
+        if (score < bestScore) {
+          bestScore = score
+          bestDistance = distance
+        }
+      }
+    }
+
+    return bestDistance
+  }
+
+  attachTo(scene: THREE.Scene, terrainProfile?: TerrainProfile): void {
+    const meshes = this.meshFactory.create(
+      this.track,
+      terrainProfile,
+      this.getPrimaryBridgeDistance()
+    )
 
     this.terrainBackfill = meshes.terrainBackfill
     this.apron = meshes.apron

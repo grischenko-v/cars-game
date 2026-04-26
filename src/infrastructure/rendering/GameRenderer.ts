@@ -61,6 +61,11 @@ export class GameRenderer {
     this.scene.fog = new THREE.Fog(fogColor, near, far)
   }
 
+  setCameraFar(distance: number): void {
+    this.camera.far = Math.max(this.camera.near + 10, distance)
+    this.camera.updateProjectionMatrix()
+  }
+
   dispose(): void {
     window.removeEventListener('resize', this.handleResize)
     this.renderer.dispose()

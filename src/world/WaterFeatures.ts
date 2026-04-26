@@ -17,29 +17,27 @@ interface RectSpec {
 }
 
 export class WaterFeatures {
-  private static readonly bridgeCandidateFractions = [0.34, 0.47, 0.61, 0.76, 0.88, 0.22]
-
   private readonly group = new THREE.Group()
   private readonly waterColorTexture = WaterFeatures.createWaterColorTexture()
   private readonly waterBumpTexture = WaterFeatures.createWaterBumpTexture()
   private readonly waterMaterial = new THREE.MeshStandardMaterial({
-    color: 0x4fb6d8,
+    color: 0x58bde8,
     map: this.waterColorTexture,
     bumpMap: this.waterBumpTexture,
-    bumpScale: 0.24,
-    roughness: 0.22,
+    bumpScale: 0.42,
+    roughness: 0.12,
     metalness: 0.06,
-    emissive: 0x0b3141,
-    emissiveIntensity: 0.16,
+    emissive: 0x1d6f8d,
+    emissiveIntensity: 0.42,
     transparent: false,
     opacity: 1,
     depthWrite: true,
     side: THREE.FrontSide,
   })
   private readonly curbMaterial = new THREE.MeshStandardMaterial({
-    color: 0xc8c7bd,
-    roughness: 0.86,
-    metalness: 0.04,
+    color: 0xd9d8ce,
+    roughness: 0.82,
+    metalness: 0.05,
   })
 
   constructor(
@@ -72,7 +70,8 @@ export class WaterFeatures {
 
     const water = new THREE.Mesh(this.buildRectGeometry(waterRects), this.waterMaterial)
     water.receiveShadow = true
-    water.renderOrder = -2
+    water.frustumCulled = false
+    water.renderOrder = -1
     this.group.add(water)
   }
 
@@ -97,7 +96,7 @@ export class WaterFeatures {
       this.road.sampleCenterlineByDistance(distance, center, tangent)
       side.set(-tangent.z, 0, tangent.x).normalize()
       center.addScaledVector(side, lateralOffset)
-      center.y = this.terrain.height(center.x, center.z) + 0.035
+      center.y = this.terrain.height(center.x, center.z) + 0.08
 
       rects.push({
         center: center.clone(),
@@ -110,7 +109,7 @@ export class WaterFeatures {
   }
 
   private addMandatoryRiverBridge(rects: RectSpec[]): void {
-    const distance = this.findBridgeDistance()
+    const distance = this.road.getPrimaryBridgeDistance()
     const center = new THREE.Vector3()
     const tangent = new THREE.Vector3()
     const side = new THREE.Vector3()
@@ -118,40 +117,52 @@ export class WaterFeatures {
     this.road.sampleCenterlineByDistance(distance, center, tangent)
     side.set(-tangent.z, 0, tangent.x).normalize()
 
-    const riverWidth = THREE.MathUtils.lerp(26, 34, this.pseudoRandom(11.1))
-    const riverLength = this.terrainProfile.kind === 'mountains'
-      ? THREE.MathUtils.lerp(132, 168, this.pseudoRandom(12.7))
-      : THREE.MathUtils.lerp(108, 144, this.pseudoRandom(12.7))
+    const riverHalfAlong = THREE.MathUtils.lerp(34, 42, this.pseudoRandom(11.1))
+    const riverHalfAcross = this.terrainProfile.kind === 'mountains'
+      ? THREE.MathUtils.lerp(112, 146, this.pseudoRandom(12.7))
+      : THREE.MathUtils.lerp(96, 128, this.pseudoRandom(12.7))
     const bridgeSurfaceY = this.road.getBankedHeightAtDistance(distance, 0, this.road.roadY)
     const waterCenter = center.clone()
-    waterCenter.y = bridgeSurfaceY - 0.72
+    waterCenter.y = bridgeSurfaceY - 1.28
 
     rects.push({
       center: waterCenter,
       axisA: tangent.clone().normalize(),
       axisB: side.clone(),
-      halfA: riverWidth * 0.5,
-      halfB: riverLength * 0.5,
+      halfA: riverHalfAlong,
+      halfB: riverHalfAcross,
       conformToTerrain: false,
       segmentsA: 1,
       segmentsB: 1,
     })
 
-    this.addBridge(distance, riverWidth, center, tangent, side)
-  }
+    const sideWaterOffset =
+      this.road.getOuterHalfWidthAtDistance(distance) +
+      this.road.apronWidth +
+      30
+    const visibleBranchHalfLength = THREE.MathUtils.lerp(42, 58, this.pseudoRandom(15.4))
+    const visibleBranchHalfWidth = THREE.MathUtils.lerp(44, 66, this.pseudoRandom(18.6))
 
-  private findBridgeDistance(): number {
-    for (const fraction of WaterFeatures.bridgeCandidateFractions) {
-      const distance = fraction * this.road.totalLength
+    for (const sideSign of [-1, 1]) {
+      const branchCenter = center
+        .clone()
+        .addScaledVector(side, sideSign * sideWaterOffset)
+      branchCenter.y = bridgeSurfaceY - 1.2
 
-      if (!this.road.isLaneTransitionAtDistance(distance, 94)) {
-        return distance
-      }
+      rects.push({
+        center: branchCenter,
+        axisA: tangent.clone().normalize(),
+        axisB: side.clone(),
+        halfA: visibleBranchHalfWidth,
+        halfB: visibleBranchHalfLength,
+        conformToTerrain: false,
+        segmentsA: 1,
+        segmentsB: 1,
+      })
     }
 
-    return this.road.totalLength * 0.5
+    this.addBridge(distance, riverHalfAlong * 2, center, tangent, side)
   }
-
   private addBridge(
     distance: number,
     riverWidth: number,
@@ -159,25 +170,26 @@ export class WaterFeatures {
     tangent: THREE.Vector3,
     side: THREE.Vector3
   ): void {
-    const bridgeWidth = this.road.getOuterHalfWidthAtDistance(distance) * 2 + 2.8
-    const bridgeLength = riverWidth + 16
+    const bridgeWidth = this.road.getOuterHalfWidthAtDistance(distance) * 2 + 2.2
+    const bridgeLength = THREE.MathUtils.clamp(riverWidth + 8, 46, 74)
     const y = this.road.getBankedHeightAtDistance(distance, 0, this.road.roadY)
     const heading = Math.atan2(tangent.x, tangent.z)
 
     for (const sideSign of [-1, 1]) {
       const curb = new THREE.Mesh(
-        new THREE.BoxGeometry(0.56, 0.42, bridgeLength + 1.2),
+        new THREE.BoxGeometry(0.64, 0.72, bridgeLength + 0.8),
         this.curbMaterial
       )
 
       curb.position
-        .set(center.x, y + 0.26, center.z)
-        .addScaledVector(side, sideSign * bridgeWidth * 0.5)
+        .set(center.x, y + 0.36, center.z)
+        .addScaledVector(side, sideSign * (bridgeWidth * 0.5 + 0.18))
       curb.rotation.y = heading
       curb.castShadow = true
       curb.receiveShadow = true
       this.group.add(curb)
     }
+
   }
 
   private buildRectGeometry(rects: RectSpec[]): THREE.BufferGeometry {

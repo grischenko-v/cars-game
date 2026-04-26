@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { qualitySettings } from '../application/config/QualitySettings'
+import type { TerrainProfile } from '../domain/environment/TerrainProfile'
 import { SpatialHashGrid } from '../domain/shared/SpatialHashGrid'
 import { loadRepeatingPbrTextures } from '../infrastructure/graphics/TextureFactory'
 import type { Terrain } from './Terrain'
@@ -73,7 +74,8 @@ export class Decorations {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly terrain: Terrain,
-    private readonly road: Road
+    private readonly road: Road,
+    private readonly terrainProfile?: TerrainProfile
   ) {
     this.group = new THREE.Group()
     this.group.name = 'decorations-instanced'
@@ -208,7 +210,7 @@ export class Decorations {
 
     this.registerGuardrailColliders()
 
-    const treeTargetCount = 84
+    const treeTargetCount = this.terrainProfile?.kind === 'mountains' ? 52 : 84
     let treeAttempts = 0
 
     while (this.treeInstances.length < treeTargetCount && treeAttempts < 400) {
@@ -231,7 +233,7 @@ export class Decorations {
       this.addTree(x, z)
     }
 
-    const houseClusterCount = 10
+    const houseClusterCount = this.terrainProfile?.kind === 'mountains' ? 0 : 10
     for (let i = 0; i < houseClusterCount; i++) {
       const phase = i / houseClusterCount + this.randomRange(-0.025, 0.025)
       const angle = THREE.MathUtils.euclideanModulo(phase, 1) * Math.PI * 2
@@ -286,7 +288,7 @@ export class Decorations {
       }
     }
 
-    const patchTargetCount = 34
+    const patchTargetCount = this.terrainProfile?.kind === 'mountains' ? 18 : 34
     let patchAttempts = 0
 
     while (this.groundPatchInstances.length < patchTargetCount && patchAttempts < 260) {
@@ -306,7 +308,7 @@ export class Decorations {
       this.addGroundPatch(x, z, Math.random() > 0.32 ? 0 : 1)
     }
 
-    const rockTargetCount = 38
+    const rockTargetCount = this.terrainProfile?.kind === 'mountains' ? 0 : 38
     let rockAttempts = 0
 
     while (this.rockInstances.length < rockTargetCount && rockAttempts < 320) {
@@ -642,7 +644,6 @@ export class Decorations {
     const dirtPatches = this.groundPatchInstances.filter((patch) => patch.variant === 1)
     const patchGeometry = new THREE.CircleGeometry(1, 28)
     patchGeometry.rotateX(-Math.PI / 2)
-    const softPatchAlpha = this.createSoftGroundPatchAlphaMap()
     const sandTextures = loadRepeatingPbrTextures('/textures/sand', 'Ground054_1K-JPG', 2.8, 2.8)
 
     this.addGroundPatchInstancedMesh(
@@ -652,17 +653,14 @@ export class Decorations {
         map: sandTextures.map,
         normalMap: sandTextures.normalMap,
         roughnessMap: sandTextures.roughnessMap,
-        alphaMap: softPatchAlpha,
-        transparent: true,
-        opacity: 0.86,
-        alphaTest: 0.02,
         roughness: 1,
         metalness: 0,
         normalScale: new THREE.Vector2(0.22, 0.22),
-        depthWrite: false,
+        side: THREE.FrontSide,
+        depthWrite: true,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        polygonOffsetFactor: -3,
+        polygonOffsetUnits: -3,
       }),
       sandPatches
     )
@@ -670,16 +668,13 @@ export class Decorations {
       patchGeometry,
       new THREE.MeshStandardMaterial({
         color: 0x8f7c5e,
-        alphaMap: softPatchAlpha,
-        transparent: true,
-        opacity: 0.8,
-        alphaTest: 0.02,
         roughness: 1,
         metalness: 0,
-        depthWrite: false,
+        side: THREE.FrontSide,
+        depthWrite: true,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        polygonOffsetFactor: -3,
+        polygonOffsetUnits: -3,
       }),
       dirtPatches
     )
@@ -732,7 +727,7 @@ export class Decorations {
   ): void {
     if (instances.length === 0) return
 
-    const chunkSize = 90
+    const chunkSize = 56
     const chunks = new Map<string, ScenicInstance[]>()
 
     for (const instance of instances) {
@@ -748,9 +743,10 @@ export class Decorations {
     chunks.forEach((chunkInstances) => {
       const mesh = new THREE.InstancedMesh(geometry, material, chunkInstances.length)
       const center = new THREE.Vector3()
+      let maxRadiusSq = 0
 
-      mesh.castShadow = false
-      mesh.receiveShadow = false
+      mesh.castShadow = true
+      mesh.receiveShadow = true
       mesh.frustumCulled = true
 
       chunkInstances.forEach((instance, index) => {
@@ -771,6 +767,13 @@ export class Decorations {
 
       center.multiplyScalar(1 / chunkInstances.length)
       mesh.userData.center = center
+      for (let i = 0; i < chunkInstances.length; i++) {
+        const instance = chunkInstances[i]
+        const dx = instance.x - center.x
+        const dz = instance.z - center.z
+        maxRadiusSq = Math.max(maxRadiusSq, dx * dx + dz * dz)
+      }
+      mesh.userData.radius = Math.sqrt(maxRadiusSq) + 12
       mesh.instanceMatrix.needsUpdate = true
       mesh.computeBoundingSphere()
       this.group.add(mesh)
@@ -828,13 +831,17 @@ export class Decorations {
     if (this.visibilityUpdateTimer > 0) return
 
     this.visibilityUpdateTimer = qualitySettings.visibilityUpdateInterval
-    const maxDistanceSq = qualitySettings.decorationDrawDistance * qualitySettings.decorationDrawDistance
+    const maxDistance = qualitySettings.decorationDrawDistance
+    const maxDistanceSq = maxDistance * maxDistance
     const { children } = this.group
 
     for (let i = 0; i < children.length; i++) {
       const child = children[i]
       const center = child.userData.center as THREE.Vector3 | undefined
-      child.visible = !center || center.distanceToSquared(carPosition) <= maxDistanceSq
+      const radius = (child.userData.radius as number | undefined) ?? 0
+      child.visible =
+        !center ||
+        center.distanceToSquared(carPosition) <= (maxDistance + radius) * (maxDistance + radius)
     }
   }
 }

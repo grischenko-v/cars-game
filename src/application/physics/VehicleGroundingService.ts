@@ -125,7 +125,9 @@ export class VehicleGroundingService {
     }
 
     view.updateMatrixWorld(true)
-    this.liftVehicleVisualBoundsAboveSurface(view, extraRideHeight)
+    if (surfaceExtraRideHeight > 0.001) {
+      this.liftVehicleVisualBoundsAboveSurface(view, extraRideHeight)
+    }
   }
 
   getSurfaceAlignedY(
@@ -194,8 +196,8 @@ export class VehicleGroundingService {
 
     const visualLift =
       centerSurface.height +
-      this.getGroundClearance(centerSurface) * 0.45 +
-      surfaceExtraRideHeight -
+      Math.min(this.getGroundClearance(centerSurface) * 0.12, this.settings.visibleSurfaceClearance * 0.35) +
+      Math.min(surfaceExtraRideHeight, this.settings.visibleSurfaceClearance * 0.35) -
       this.tmpBox.min.y
 
     if (visualLift > 0) {
@@ -223,12 +225,12 @@ export class VehicleGroundingService {
         const surface = this.sampleSurface(x, z)
         const surfaceExtra = Math.min(
           this.getSurfaceExtraRideHeight(surface, extraRideHeight),
-          this.settings.visibleSurfaceClearance
+          this.settings.visibleSurfaceClearance * 0.45
         )
 
         requiredBottomY = Math.max(
           requiredBottomY,
-          surface.height + this.settings.visibleSurfaceClearance + surfaceExtra
+          surface.height + this.settings.visibleSurfaceClearance * 0.55 + surfaceExtra
         )
       }
     }

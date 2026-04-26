@@ -37,11 +37,11 @@ export class RockFeatures {
   }
 
   private populate(): void {
-    const clusterCount = this.terrainProfile.kind === 'mountains'
-      ? 58
-      : this.terrainProfile.kind === 'hills'
-        ? 24
-        : 8
+    if (this.terrainProfile.kind === 'mountains') {
+      return
+    }
+
+    const clusterCount = this.terrainProfile.kind === 'hills' ? 24 : 8
     const center = new THREE.Vector3()
     const tangent = new THREE.Vector3()
     const side = new THREE.Vector3()
@@ -62,12 +62,10 @@ export class RockFeatures {
         this.road.getOuterHalfWidthAtDistance(distance) +
         THREE.MathUtils.lerp(
           this.terrainProfile.kind === 'plain' ? 62 : 38,
-          this.terrainProfile.kind === 'mountains' ? 128 : 150,
+          150,
           this.pseudoRandom(i + 7.4)
         )
-      const rockCount = this.terrainProfile.kind === 'mountains'
-        ? THREE.MathUtils.lerp(6, 12, this.pseudoRandom(i + 9.8))
-        : THREE.MathUtils.lerp(2, 5, this.pseudoRandom(i + 9.8))
+      const rockCount = THREE.MathUtils.lerp(2, 5, this.pseudoRandom(i + 9.8))
 
       for (let j = 0; j < Math.floor(rockCount); j++) {
         const along = THREE.MathUtils.lerp(-18, 18, this.pseudoRandom(i * 13.7 + j))
@@ -88,7 +86,7 @@ export class RockFeatures {
 
       if (
         this.terrainProfile.kind !== 'plain' &&
-        this.pseudoRandom(i + 19.6) > (this.terrainProfile.kind === 'mountains' ? 0.42 : 0.72)
+        this.pseudoRandom(i + 19.6) > 0.72
       ) {
         this.addCliffWall(center, tangent, side, sideSign, baseOffset, i)
       }
@@ -103,14 +101,12 @@ export class RockFeatures {
     baseOffset: number,
     clusterIndex: number
   ): void {
-    const wallRocks = this.terrainProfile.kind === 'mountains'
-      ? THREE.MathUtils.randInt(4, 7)
-      : THREE.MathUtils.randInt(2, 4)
+    const wallRocks = THREE.MathUtils.randInt(2, 4)
 
     for (let i = 0; i < wallRocks; i++) {
       const seed = clusterIndex * 47.5 + i * 9.1
-      const along = THREE.MathUtils.lerp(-46, 46, this.pseudoRandom(seed + 1.7))
-      const sideJitter = THREE.MathUtils.lerp(-10, 24, this.pseudoRandom(seed + 2.9))
+      const along = THREE.MathUtils.lerp(-32, 32, this.pseudoRandom(seed + 1.7))
+      const sideJitter = THREE.MathUtils.lerp(12, 36, this.pseudoRandom(seed + 2.9))
       const x =
         center.x +
         tangent.x * along +
@@ -123,8 +119,7 @@ export class RockFeatures {
       if (this.road.isPointOnRoad(x, z, this.road.shoulderWidth + 30)) continue
 
       const baseScale =
-        THREE.MathUtils.lerp(6.5, 18.5, this.pseudoRandom(seed + 4.2)) *
-        (this.terrainProfile.kind === 'mountains' ? 1.7 : 0.85)
+        THREE.MathUtils.lerp(4.5, 10.5, this.pseudoRandom(seed + 4.2)) * 0.85
 
       this.instances.push({
         x,
@@ -143,13 +138,12 @@ export class RockFeatures {
 
   private addRockInstance(x: number, z: number, clusterIndex: number, rockIndex: number): void {
     const seed = clusterIndex * 31.7 + rockIndex * 11.3
-    const mountainScale = this.terrainProfile.kind === 'mountains' ? 2.35 : 1
     const baseScale =
       THREE.MathUtils.lerp(
         this.terrainProfile.kind === 'plain' ? 1.8 : 2.8,
-        this.terrainProfile.kind === 'plain' ? 4.4 : 10.8,
+        this.terrainProfile.kind === 'plain' ? 4.4 : 7.2,
         this.pseudoRandom(seed)
-      ) * mountainScale
+      )
     const heightBoost = THREE.MathUtils.lerp(1.05, 2.25, this.pseudoRandom(seed + 2.2))
 
     this.instances.push({
@@ -177,6 +171,7 @@ export class RockFeatures {
       metalness: 0.02,
       normalScale: new THREE.Vector2(0.55, 0.55),
       flatShading: true,
+      side: THREE.FrontSide,
     })
     const geometries = [
       this.createJaggedRockGeometry(new THREE.DodecahedronGeometry(1, 0), 1.3),
